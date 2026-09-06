@@ -15,13 +15,13 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the decision record.
 
 ## Status
 
-**Milestone 0 — Foundation. Complete.**
+**Milestone 1 — Ingestion and chunking. Complete.**
 
 | Milestone | Scope | State |
 | --- | --- | --- |
 | 0 | Monorepo, infra, schema, service skeletons, test harness | done |
-| 1 | Document ingestion, chunking, metadata preservation | next |
-| 2 | Embeddings, Qdrant index, BM25, hybrid search, RRF | |
+| 1 | Document ingestion, chunking, metadata preservation | done |
+| 2 | Embeddings, Qdrant index, BM25, hybrid search, RRF | next |
 | 3 | Reranking, context construction, eval harness | |
 | 4 | LLM provider, grounded chat, WebSocket streaming | |
 | 5 | Test generation, grading, flashcards | |
@@ -36,6 +36,7 @@ apps/
   api/          Node + Hono + Zod — auth, CRUD, REST, WebSockets, job producer
   worker/       Node + BullMQ     — async document processing
 packages/
+  db/           Drizzle schema and client, shared by api & worker
   shared/       Zod schemas and the WebSocket protocol, shared by api & worker
 services/
   rag/          Python + FastAPI  — parsing, retrieval, reranking, generation
@@ -56,7 +57,7 @@ keys.
 | --- | --- | --- |
 | Node | >= 22 | uses the built-in `.env` parser |
 | Python | >= 3.10 | |
-| Docker Desktop | any recent | **not yet installed** — needed for Milestone 1 onward |
+| Docker Desktop | any recent | **not yet installed** — blocks running the upload path end to end |
 
 ---
 
@@ -129,6 +130,14 @@ tests are exercisable offline.
 them against the Python models — it fails loudly if the two backends drift on
 enums or chunk metadata field names.
 
+Parser and chunker tests run against real generated PDF and PPTX files rather
+than mocks, because parsing bugs live in the gap between what a library is
+documented to return and what it actually returns. Regenerate them with:
+
+```bash
+cd services/rag && .venv/Scripts/python.exe tests/fixtures/generate.py
+```
+
 ---
 
 ## Providers
@@ -148,6 +157,20 @@ BM25 needs no model at all: term frequency, IDF and stemming, running locally.
 Swapping any of them means implementing the matching Protocol in
 `services/rag/app/core/interfaces.py` and registering it under a name — no
 pipeline code changes.
+
+---
+
+## Inspecting chunk quality
+
+Chunk boundaries decide what retrieval can possibly return, so they are worth
+looking at directly rather than inferring from scores. With a file under
+`storage/uploads/`:
+
+```bash
+curl -s -X POST http://localhost:8000/ingest/preview -H "content-type: application/json" -H "x-internal-token: dev_internal_token_change_me" -d '{"storage_key":"<key>","filename":"notes.pdf","kind":"pdf","chunker":"structural"}'
+```
+
+Swap `structural` for `fixed_window` to see the naive baseline on the same file.
 
 ---
 

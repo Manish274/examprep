@@ -286,6 +286,26 @@ class TestUndersizedChunks:
         assert "Brief." in chunks[0].text
         assert "substantial" in chunks[0].text
 
+    def test_merging_keeps_the_more_specific_heading_path(self) -> None:
+        # The deeper path contains the shallower one as a prefix, so keeping it
+        # loses nothing. Keeping the parent instead would erase the child
+        # heading from the index -- and that heading is often the exact phrase
+        # a student searches for.
+        document = _doc(
+            _heading("Normalization", 1, 0),
+            _para("Brief intro.", 1),
+            _heading("First Normal Form", 2, 2),
+            _para("A relation is in 1NF when every attribute is atomic.", 3),
+        )
+        chunks = _chunker(min_tokens=40).chunk(document)
+
+        assert len(chunks) == 1
+        assert chunks[0].metadata.heading_path == [
+            "Normalization",
+            "First Normal Form",
+        ]
+        assert chunks[0].metadata.heading == "First Normal Form"
+
     def test_unrelated_thin_sections_are_not_merged(self) -> None:
         document = _doc(
             _heading("Alpha", 1, 0),

@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { sql } from "drizzle-orm";
-import { db } from "../db/index.js";
+import { db } from "../lib/db.js";
 import { redis } from "../lib/redis.js";
 import { ragHealth } from "../lib/rag-client.js";
 import { logger } from "../lib/logger.js";

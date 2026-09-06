@@ -285,9 +285,19 @@ class StructuralChunker:
                 combined = pieces + next_pieces
                 ceiling = self.target_tokens * _OVERSIZE_TOLERANCE
                 if sum(p.tokens for p in combined) <= ceiling:
-                    # Keep the parent segment so the heading path stays the
-                    # broader of the two.
-                    merged.append((segment, combined))
+                    # Keep the deeper heading path. _can_merge only permits a
+                    # descendant or an identical path, so the deeper one has
+                    # the shallower as its prefix and is strictly more
+                    # informative. Keeping the parent instead would erase the
+                    # child heading from the index entirely -- and a heading
+                    # like "Third Normal Form" is exactly the phrase a student
+                    # searches for.
+                    deeper = (
+                        next_segment
+                        if len(next_segment.heading_path) > len(segment.heading_path)
+                        else segment
+                    )
+                    merged.append((deeper, combined))
                     index += 2
                     continue
 

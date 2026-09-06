@@ -4,6 +4,8 @@ import { secureHeaders } from "hono/secure-headers";
 import { errorHandler } from "./middleware/error-handler.js";
 import { requestContext } from "./middleware/request-context.js";
 import { healthRoutes } from "./routes/health.js";
+import { authRoutes } from "./routes/auth.js";
+import { documentRoutes } from "./routes/documents.js";
 import { notFound } from "./lib/errors.js";
 import type { AppEnv } from "./types.js";
 
@@ -26,9 +28,11 @@ export function createApp() {
   );
 
   app.route("/", healthRoutes);
+  app.route("/api/auth", authRoutes);
+  app.route("/api/documents", documentRoutes);
 
   // Feature routers land here as milestones complete:
-  //   /api/auth  /api/documents  /api/chat  /api/tests  /api/flashcards
+  //   /api/chat  /api/tests  /api/flashcards
 
   app.notFound(() => {
     throw notFound("Route");

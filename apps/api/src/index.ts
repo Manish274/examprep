@@ -4,7 +4,7 @@ import { serve } from "@hono/node-server";
 import { createApp } from "./app.js";
 import { loadEnv } from "./env.js";
 import { logger } from "./lib/logger.js";
-import { closeDb } from "./db/index.js";
+import { closeDb } from "./lib/db.js";
 import { closeRedis } from "./lib/redis.js";
 
 const env = loadEnv();

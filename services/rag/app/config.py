@@ -9,12 +9,18 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# config.py -> app -> rag -> services -> repo root
+REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=(".env", "../../.env"),
+        # Absolute, so the same file is read no matter where the service
+        # is launched from.
+        env_file=(REPO_ROOT / ".env", Path(__file__).resolve().parent / ".env"),
         env_file_encoding="utf-8",
         extra="ignore",
         case_sensitive=True,
@@ -34,7 +40,7 @@ class Settings(BaseSettings):
 
     # ── storage ──────────────────────────────────────────────
     STORAGE_DRIVER: str = "local"
-    STORAGE_LOCAL_PATH: Path = Path("../../storage/uploads")
+    STORAGE_LOCAL_PATH: Path = Path("./storage/uploads")
 
     # ── providers ────────────────────────────────────────────
     # Empty GEMINI_API_KEY keeps the whole service on mock providers, so the
@@ -74,6 +80,18 @@ class Settings(BaseSettings):
     LANGFUSE_PUBLIC_KEY: str = ""
     LANGFUSE_SECRET_KEY: str = ""
     LANGFUSE_HOST: str = "http://localhost:3000"
+
+    @field_validator("STORAGE_LOCAL_PATH")
+    @classmethod
+    def _anchor_to_repo_root(cls, value: Path) -> Path:
+        """Resolves a relative storage path against the repo root.
+
+        The Node services run from the repo root and this one runs from
+        services/rag, so the same "./storage/uploads" in .env would otherwise
+        point at two different directories and uploads would vanish between
+        them.
+        """
+        return value if value.is_absolute() else (REPO_ROOT / value).resolve()
 
     @property
     def uses_mock_providers(self) -> bool:
