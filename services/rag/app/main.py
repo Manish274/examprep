@@ -15,7 +15,7 @@ from typing import Any
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from app.api import health
+from app.api import health, ingest
 from app.config import get_settings
 
 logger = logging.getLogger("rag")
@@ -56,9 +56,10 @@ def create_app() -> FastAPI:
     )
 
     app.include_router(health.router)
+    app.include_router(ingest.router)
 
     # Feature routers land here as milestones complete:
-    #   /ingest  /retrieve  /chat  /generate/test  /generate/flashcards  /eval
+    #   /retrieve  /chat  /generate/test  /generate/flashcards  /eval
 
     @app.exception_handler(Exception)
     async def unhandled(request: Request, exc: Exception) -> JSONResponse:

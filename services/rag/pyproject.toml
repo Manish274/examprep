@@ -21,6 +21,9 @@ ignore = ["B008"]  # FastAPI Depends() in defaults is idiomatic
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Loads PyMuPDF before collection begins. See pymupdf_preload.py -- without
+# it, the first import of the native extension mid-run faults on Windows.
+addopts = "-p pymupdf_preload"
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 filterwarnings = ["error::DeprecationWarning"]

@@ -45,3 +45,6 @@ coverage/
 .nyc_output/
 htmlcov/
 .coverage
+
+# pytest/tooling artefacts
+services/rag/.pytest_cache/
