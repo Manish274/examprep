@@ -43,6 +43,31 @@ export class RagPermanentError extends Error {
   }
 }
 
+/**
+ * Turns a RAG service error into something worth showing a student.
+ *
+ * FastAPI wraps messages in {"detail": "..."}, and this message ends up on the
+ * document row as the explanation for why their upload failed. Left raw, a
+ * genuinely useful line like "this looks like a scanned document" arrives
+ * buried in a JSON envelope behind a status code.
+ */
+export function describeFailure(status: number, body: string): string {
+  try {
+    const parsed: unknown = JSON.parse(body);
+    if (
+      parsed !== null &&
+      typeof parsed === "object" &&
+      "detail" in parsed &&
+      typeof (parsed as { detail: unknown }).detail === "string"
+    ) {
+      return (parsed as { detail: string }).detail;
+    }
+  } catch {
+    // Not JSON — fall through to the raw body.
+  }
+  return `Document processing failed (${status}): ${body.slice(0, 300)}`;
+}
+
 export interface IngestRequest {
   documentId: string;
   filename: string;
@@ -87,7 +112,7 @@ export async function ingest(
 
     if (!response.ok) {
       const body = await response.text().catch(() => "");
-      const message = `RAG ingest failed (${response.status}): ${body.slice(0, 500)}`;
+      const message = describeFailure(response.status, body);
 
       // 4xx means the request or the document is the problem; retrying wastes
       // three attempts and delays the failure the student needs to see.

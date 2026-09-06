@@ -1,8 +1,10 @@
 import { mkdtemp, readdir, rm } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { LocalFilesystemStorage, sha256, storageKeyFor } from "../lib/storage.js";
+import { fromRepoRoot, repoRoot } from "../lib/paths.js";
 
 let root: string;
 let storage: LocalFilesystemStorage;
@@ -76,6 +78,35 @@ describe("LocalFilesystemStorage", () => {
         "lecture-3.pdf",
       );
     });
+  });
+});
+
+describe("repo-root anchoring", () => {
+  // npm workspace scripts run with the working directory set to the package,
+  // so a relative path from the shared .env resolved against cwd would put
+  // uploads in apps/api/storage/uploads while the Python service looked in the
+  // repo root. The two services would silently disagree about where a file is.
+  it("resolves a relative path against the repo root, not cwd", () => {
+    const resolved = fromRepoRoot("./storage/uploads");
+
+    expect(resolved.startsWith(repoRoot())).toBe(true);
+    expect(resolved).not.toContain(join("apps", "api"));
+  });
+
+  it("finds the repo root by locating a known root-level file", () => {
+    // Anchors the assertion to something real rather than a path shape.
+    expect(existsSync(join(repoRoot(), "docker-compose.yml"))).toBe(true);
+    expect(existsSync(join(repoRoot(), "package.json"))).toBe(true);
+  });
+
+  it("leaves an absolute path untouched", () => {
+    const absolute = resolve(tmpdir(), "elsewhere");
+    expect(fromRepoRoot(absolute)).toBe(absolute);
+  });
+
+  it("anchors the storage root the same way", () => {
+    const relative = new LocalFilesystemStorage("./storage/uploads");
+    expect(relative.localPath("u/d.pdf").startsWith(repoRoot())).toBe(true);
   });
 });
 

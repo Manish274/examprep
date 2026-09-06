@@ -57,7 +57,7 @@ keys.
 | --- | --- | --- |
 | Node | >= 22 | uses the built-in `.env` parser |
 | Python | >= 3.10 | |
-| Docker Desktop | any recent | **not yet installed** — blocks running the upload path end to end |
+| Docker Desktop | any recent | WSL2 backend |
 
 ---
 
@@ -107,8 +107,8 @@ Check everything is wired:
 curl http://localhost:3001/health/ready
 ```
 
-`degraded` with per-dependency detail is the expected answer before Docker is
-running. `rag: ok` confirms the Node → Python link.
+All three checks green means the whole path is wired. Before `npm run infra:up`
+the answer is `degraded` with per-dependency detail, which is also correct.
 
 ---
 

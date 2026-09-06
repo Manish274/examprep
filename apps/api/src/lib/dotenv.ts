@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { dirname, resolve } from "node:path";
+import { resolve } from "node:path";
+import { repoRoot } from "./paths.js";
 
 /**
  * Loads the repo-root .env into process.env using Node's built-in parser.
@@ -9,8 +9,7 @@ import { dirname, resolve } from "node:path";
  * environment and must not have a developer's local .env leak into them.
  */
 export function loadDotEnv(): void {
-  const here = dirname(fileURLToPath(import.meta.url));
-  const envPath = resolve(here, "../../../../.env");
+  const envPath = resolve(repoRoot(), ".env");
   if (existsSync(envPath)) {
     process.loadEnvFile(envPath);
   }

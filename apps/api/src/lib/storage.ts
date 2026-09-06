@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, resolve, sep } from "node:path";
 import { env } from "../env.js";
+import { fromRepoRoot } from "./paths.js";
 
 /**
  * Where uploaded documents live. Callers only ever hold an opaque key, so
@@ -24,7 +25,9 @@ export class LocalFilesystemStorage implements StorageProvider {
   private readonly root: string;
 
   constructor(root: string) {
-    this.root = resolve(root);
+    // Anchored to the repo root, not the working directory: the RAG service
+    // resolves the same configured path independently, and they must agree.
+    this.root = fromRepoRoot(root);
   }
 
   private resolveKey(key: string): string {
