@@ -1,0 +1,47 @@
+# dependencies
+node_modules/
+.pnpm-store/
+
+# build output
+dist/
+build/
+*.tsbuildinfo
+
+# env
+.env
+.env.local
+.env.*.local
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.egg-info/
+
+# uploaded documents + derived artefacts
+storage/uploads/*
+!storage/uploads/.gitkeep
+storage/derived/
+
+# eval artefacts
+services/rag/eval_runs/
+services/rag/gold_sets/*.jsonl
+
+# logs / os / editor
+*.log
+logs/
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# test coverage
+coverage/
+.nyc_output/
+htmlcov/
+.coverage

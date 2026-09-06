@@ -1,0 +1,35 @@
+{
+  "name": "examprep-rag",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "AI-powered examination preparation platform with a grounded RAG pipeline",
+  "engines": {
+    "node": ">=22"
+  },
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "dev:api": "npm run dev --workspace @examprep/api",
+    "dev:worker": "npm run dev --workspace @examprep/worker",
+    "db:generate": "npm run db:generate --workspace @examprep/api",
+    "db:migrate": "npm run db:migrate --workspace @examprep/api",
+    "db:studio": "npm run db:studio --workspace @examprep/api",
+    "infra:up": "docker compose up -d",
+    "infra:down": "docker compose down",
+    "infra:logs": "docker compose logs -f",
+    "infra:reset": "docker compose down -v && docker compose up -d"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3",
+    "vitest": "^2.1.8"
+  }
+}
