@@ -25,9 +25,24 @@ import sys
 import pymupdf  # noqa: F401  must load before collection begins
 import pytest
 
+_exit_status = 0
+
 
 @pytest.hookimpl(trylast=True)
 def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
+    global _exit_status
+    _exit_status = int(exitstatus)
+
+
+def pytest_unconfigure(config: pytest.Config) -> None:
+    """Exit here rather than in pytest_sessionfinish.
+
+    The terminal reporter prints the failure tracebacks and summary from a
+    hookwrapper around sessionfinish, whose post-yield half runs after every
+    plain implementation. Exiting from sessionfinish therefore killed the
+    process before the failure output was written -- tests reported as failed
+    with no visible reason. unconfigure runs after all reporting is done.
+    """
     sys.stdout.flush()
     sys.stderr.flush()
-    os._exit(int(exitstatus))
+    os._exit(_exit_status)

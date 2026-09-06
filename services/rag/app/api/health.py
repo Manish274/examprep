@@ -42,6 +42,7 @@ async def health(settings: SettingsDep) -> dict[str, Any]:
             "tracer": settings.TRACER,
         },
         "mock_mode": settings.uses_mock_providers,
+        "gemini_key_present": settings.has_gemini_key,
     }
 
 

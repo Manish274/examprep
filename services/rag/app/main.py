@@ -36,9 +36,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         settings.uses_mock_providers,
     )
     if settings.uses_mock_providers:
+        reason = (
+            "no GEMINI_API_KEY set"
+            if not settings.has_gemini_key
+            else "providers not yet switched over"
+        )
         logger.warning(
-            "No GEMINI_API_KEY set - running on mock providers. "
-            "Retrieval and generation results are not meaningful."
+            "Running on mock providers (%s). Retrieval and generation "
+            "results are not meaningful.",
+            reason,
         )
     yield
     logger.info("rag service stopped")

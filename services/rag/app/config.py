@@ -95,7 +95,18 @@ class Settings(BaseSettings):
 
     @property
     def uses_mock_providers(self) -> bool:
-        return not self.GEMINI_API_KEY
+        """Whether any neural stage is still running on a stand-in.
+
+        Reports what is actually configured rather than merely whether a key
+        exists. A key can be present while the providers are still set to mock
+        -- during a milestone that has not wired them up yet -- and reporting
+        "real" then would make health output actively misleading.
+        """
+        return "mock" in {self.EMBEDDING_PROVIDER, self.LLM_PROVIDER}
+
+    @property
+    def has_gemini_key(self) -> bool:
+        return bool(self.GEMINI_API_KEY)
 
     @property
     def async_database_url(self) -> str:
