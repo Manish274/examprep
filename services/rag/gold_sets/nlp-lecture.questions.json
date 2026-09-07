@@ -1,0 +1,27 @@
+[
+  {
+    "_comment": "Deliberately mixed. The study-guide set used only paraphrase questions, which favoured dense retrieval and made its margin look larger than it is. Half of these are terminology questions a student would type verbatim -- the case BM25 exists for -- so the comparison covers both halves of the distribution.",
+    "question": "what is a bigram",
+    "heading": "N-Gram Models",
+    "kind": "terminology"
+  },
+  { "question": "define n-gram character model", "heading": "N-gram character models", "kind": "terminology" },
+  { "question": "what is smoothing", "heading": "Smoothing", "kind": "terminology" },
+  { "question": "what does NELL stand for", "heading": "Machine Reading", "kind": "terminology" },
+  { "question": "what is a cascaded FST", "heading": "Finite-State Automata", "kind": "terminology" },
+  { "question": "define precision and recall", "heading": "IR System Evaluation", "kind": "terminology" },
+  { "question": "what is stemming", "heading": "IR Refinements", "kind": "terminology" },
+  { "question": "what are CRFs and HMMs used for", "heading": "Probabilistic (not rule-based) Models", "kind": "terminology" },
+
+  { "question": "how do I handle words that never appeared in my training data", "heading": "Smoothing", "kind": "paraphrase" },
+  { "question": "how do you measure if a search engine returned the right documents", "heading": "IR System Evaluation", "kind": "paraphrase" },
+  { "question": "why is it hard to decide where one word ends and another begins", "heading": "N-gram word models", "kind": "paraphrase" },
+  { "question": "how do you rank results instead of just saying yes or no", "heading": "IR Scoring Functions", "kind": "paraphrase" },
+  { "question": "how can a machine pull structured facts out of ordinary prose", "heading": "Information Extraction", "kind": "paraphrase" },
+  { "question": "how do you build a knowledge base automatically from lots of text", "heading": "Corpus-Based Ontology Extraction", "kind": "paraphrase" },
+  { "question": "how is sorting email into junk related to predicting the next word", "heading": "Text Classification", "kind": "paraphrase" },
+  { "question": "why would a program need to understand human writing at all", "heading": "Why should agents do NLP?", "kind": "paraphrase" },
+  { "question": "how do programming languages differ from the languages people speak", "heading": "Language Models", "kind": "paraphrase" },
+  { "question": "how do you check whether a language model is any good", "heading": "Evaluation", "kind": "paraphrase" },
+  { "question": "what are the parts of a system that finds documents for a query", "heading": "Information Retrieval", "kind": "paraphrase" }
+]

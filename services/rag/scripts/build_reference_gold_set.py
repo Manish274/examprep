@@ -71,9 +71,25 @@ QUESTIONS: list[tuple[str, str]] = [
 ]
 
 
+def load_questions(path: str | None) -> list[tuple[str, str]]:
+    """Questions from a JSON file, or the built-in study-guide set.
+
+    The file is a list of [question, heading] pairs, so a gold set for a new
+    document needs no code change.
+    """
+    if path is None:
+        return QUESTIONS
+    raw = json.loads(Path(path).read_text(encoding="utf-8"))
+    return [(item["question"], item["heading"]) for item in raw]
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--chunks", required=True, help="JSON file of chunks")
+    parser.add_argument(
+        "--questions",
+        help="JSON list of {question, heading}; omit for the built-in set",
+    )
     parser.add_argument("--out", default="gold_sets/study-guide.jsonl")
     args = parser.parse_args()
 
@@ -85,7 +101,7 @@ def main() -> int:
 
     entries: list[dict] = []
     missing: list[str] = []
-    for question, heading in QUESTIONS:
+    for question, heading in load_questions(args.questions):
         ids = by_heading.get(heading)
         if not ids:
             missing.append(heading)

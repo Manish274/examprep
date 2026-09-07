@@ -1,4 +1,4 @@
-# Retrieval evaluation — first baseline
+# Retrieval evaluation — baselines
 
 Recorded 2026-09-07, end of Milestone 3. Reproduce with:
 
@@ -65,16 +65,74 @@ almost none of those. The honest reading is:
 - BM25's 0.636 MRR is **understated**
 - the hybrid result is the one to trust least, since it depends on the mix
 
-## Next
+---
 
-1. Add a second gold set of terminology-style questions and evaluate the mix.
-   The current set answers "which strategy handles paraphrase best", not
-   "which strategy should ship".
-2. Re-run on a corpus of a few hundred chunks. BM25's IDF is close to
-   meaningless at 20 documents, which is likely most of why fusion hurts.
-3. Only then decide whether hybrid+rerank earns its latency.
+# Run 2 — real lecture deck, mixed question types
 
-Recording this because it contradicts the assumption the pipeline was built
-on. The architecture supports all four strategies precisely so the choice can
-be measured rather than asserted, and right now the measurement does not favour
-the most elaborate option.
+The first run's gold set only asked paraphrase questions, which favours dense
+retrieval. This run fixes that: a real 20-slide NLP lecture deck, and 19
+questions **deliberately split** between terminology a student would type
+verbatim (BM25's case) and paraphrase (dense's case).
+
+| | |
+|---|---|
+| Corpus | A real lecture deck — 20 slides, 134 blocks, 19 chunks |
+| Gold set | 19 hand-written: 8 terminology, 11 paraphrase |
+
+```
+strategy             recall@5  precision@5          mrr       ndcg@5        hit@5       ms
+------------------------------------------------------------------------------------------
+bm25                   0.789        0.158        0.487        0.558        0.789      218
+dense                  1.000*       0.200*       0.939*       0.954*       1.000*   20163
+hybrid                 0.947        0.189        0.800        0.833        0.947    17858
+hybrid_rerank          0.947        0.189        0.836        0.859        0.947    46706
+```
+
+**Dense wins every metric outright**, with perfect recall@5.
+
+## The result that matters
+
+Split by question type:
+
+| question kind | n | BM25 MRR | dense MRR |
+|---|---|---|---|
+| terminology (*"what is a bigram"*, *"what does NELL stand for"*) | 8 | 0.729 | **1.000** |
+| paraphrase (*"how do I handle words that never appeared in training"*) | 11 | 0.397 | **0.894** |
+
+**Dense beats BM25 on terminology questions — BM25's home turf — by a wide
+margin, and scores perfectly.** That undercuts the premise hybrid search was
+built on here: that exact technical terms need keyword matching because dense
+retrieval blurs them.
+
+Two plausible reasons. `gemini-embedding-2` is far stronger on acronyms and
+rare tokens than the models that advice was formed around. And chunks are
+embedded with their heading trail, so "N-Gram Models" is literally inside the
+vector for the bigram passage — the exact-match signal is already in the dense
+index.
+
+## What this means
+
+Across two corpora and two independently written gold sets, the ordering is the
+same: **dense > hybrid+rerank > hybrid > bm25**. Fusion consistently costs
+ranking quality, and reranking recovers only part of what fusion gave away.
+
+This is not an argument to delete hybrid retrieval. It is an argument not to
+default to it:
+
+- **Default to dense** for now. Best quality, 2.3× faster than hybrid+rerank.
+- **Keep BM25 indexed.** It is free, 90× faster, and its weakness here is
+  partly an artefact of a 20-chunk corpus where IDF has almost no statistics.
+- **Re-measure at a few hundred chunks** before concluding anything permanent.
+
+## Caveats worth stating
+
+- Both corpora are ~20 chunks. This is the regime where BM25 is weakest.
+- Both gold sets map one question to one section, written by the same author as
+  the pipeline. Real student questions are messier and more varied.
+- 19 questions is small. A gap of a few points means nothing; 0.939 against
+  0.800 is large enough to act on.
+
+Recorded because it contradicts the assumption the pipeline was built on. The
+architecture supports all four strategies precisely so this could be measured
+rather than asserted — and the measurement does not favour the most elaborate
+option.
