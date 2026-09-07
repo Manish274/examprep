@@ -18,6 +18,7 @@ from app.chunking.fixed import FixedWindowChunker
 from app.chunking.structural import StructuralChunker
 from app.config import Settings
 from app.core.models import Chunk, DocumentKind, ParsedDocument
+from app.ingestion.vision_enrichment import enrich_with_vision
 from app.parsing.pdf import PyMuPDFParser
 from app.parsing.pptx import PythonPptxParser
 
@@ -70,6 +71,7 @@ class IngestionResult:
         timings: dict[str, int],
         indexed: int = 0,
         cache_hits: int = 0,
+        vision: dict[str, int] | None = None,
     ) -> None:
         self.document = document
         self.chunks = chunks
@@ -77,6 +79,7 @@ class IngestionResult:
         self.timings = timings
         self.indexed = indexed
         self.cache_hits = cache_hits
+        self.vision = vision or {}
 
 
 async def parse_and_chunk(
@@ -87,8 +90,9 @@ async def parse_and_chunk(
     kind: DocumentKind,
     settings: Settings,
     chunker_name: str = "structural",
+    vision: object | None = None,
 ) -> IngestionResult:
-    """The stages that need no credentials and no infrastructure."""
+    """Parse, optionally read the images, then chunk."""
     if not path.is_file():
         raise FileNotFoundError(f"Document not found at {path}")
 
@@ -98,10 +102,25 @@ async def parse_and_chunk(
     document = await parser.parse(path, document_id=document_id, filename=filename)
     parse_ms = int((time.perf_counter() - started) * 1000)
 
+    # Images are read before the empty-document check, because a scanned PDF
+    # has no text at all and the vision pass is exactly what rescues it.
+    vision_stats: dict[str, int] = {}
+    vision_ms = 0
+    if vision is not None and document.images:
+        started = time.perf_counter()
+        result = await enrich_with_vision(
+            document,
+            vision,
+            min_pixels=settings.VISION_MIN_PIXELS,
+            max_images=settings.VISION_MAX_IMAGES,
+        )
+        vision_ms = int((time.perf_counter() - started) * 1000)
+        vision_stats = result.as_dict()
+
     if not document.blocks:
         raise EmptyDocumentError(
-            "No extractable text found. If this is a scanned document, it "
-            "needs OCR or a searchable copy before it can be studied."
+            "No extractable text found. If this is a scanned document, enable "
+            "the vision provider so its pages can be read as images."
         )
 
     started = time.perf_counter()
@@ -124,11 +143,16 @@ async def parse_and_chunk(
         chunk_ms,
     )
 
+    timings = {"parse_ms": parse_ms, "chunk_ms": chunk_ms}
+    if vision_ms:
+        timings["vision_ms"] = vision_ms
+
     return IngestionResult(
         document=document,
         chunks=chunks,
         chunker_name=chunker_name,
-        timings={"parse_ms": parse_ms, "chunk_ms": chunk_ms},
+        timings=timings,
+        vision=vision_stats,
     )
 
 
@@ -211,6 +235,7 @@ async def ingest_document(
     embedder: object | None = None,
     sparse_encoder: object | None = None,
     store: object | None = None,
+    vision: object | None = None,
 ) -> IngestionResult:
     """Full pipeline. Stops after chunking when no index target is supplied,
     which is what the preview endpoint and the chunking tests want."""
@@ -221,6 +246,7 @@ async def ingest_document(
         kind=kind,
         settings=settings,
         chunker_name=chunker_name,
+        vision=vision,
     )
 
     if user_id and embedder and sparse_encoder and store:

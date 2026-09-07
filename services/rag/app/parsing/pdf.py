@@ -15,9 +15,15 @@ from pathlib import Path
 
 import fitz  # PyMuPDF
 
-from app.core.models import BlockType, DocumentKind, ParsedBlock, ParsedDocument
+from app.core.models import (
+    BlockType,
+    DocumentKind,
+    ExtractedImage,
+    ParsedBlock,
+    ParsedDocument,
+)
 from app.core.registry import parsers
-from app.core.text import normalize
+from app.core.text import content_hash, normalize
 from app.parsing.structure import LineRecord, detect_heading_levels
 
 logger = logging.getLogger(__name__)
@@ -33,6 +39,80 @@ _TABLE_OVERLAP = 0.5
 # fraction of font size, to count as starting a new paragraph rather than
 # continuing the current one.
 _PARAGRAPH_GAP_RATIO = 0.35
+
+# A page yielding less than this much text is treated as scanned rather than
+# sparse, and rendered for the vision model. A genuine text page with a single
+# heading still clears it comfortably.
+_SCANNED_PAGE_CHARS = 60
+
+# Rendering resolution for a scanned page. 150 DPI is legible to a vision model
+# without producing an image too large to send.
+_RENDER_DPI = 150
+
+
+def _extract_page_images(
+    page: fitz.Page, doc: fitz.Document, page_number: int, order: int
+) -> list[ExtractedImage]:
+    """Embedded raster images on one page.
+
+    Vector drawings are skipped: a chart drawn with line primitives is already
+    text-searchable for its labels, and rasterising every diagram would spend a
+    vision call on decoration.
+    """
+    found: list[ExtractedImage] = []
+    for info in page.get_images(full=True):
+        xref = info[0]
+        try:
+            extracted = doc.extract_image(xref)
+        except Exception as exc:
+            logger.debug(
+                "could not extract image %s on page %s: %s", xref, page_number, exc
+            )
+            continue
+
+        blob = extracted.get("image")
+        if not blob:
+            continue
+        found.append(
+            ExtractedImage(
+                data=blob,
+                mime_type=f"image/{extracted.get('ext', 'png')}",
+                order=order,
+                page_number=page_number,
+                width=int(extracted.get("width") or 0),
+                height=int(extracted.get("height") or 0),
+                content_hash=content_hash(blob.hex()),
+            )
+        )
+        order += 1
+    return found
+
+
+def _render_page(
+    page: fitz.Page, page_number: int, order: int
+) -> ExtractedImage | None:
+    """Renders a whole page as an image.
+
+    Used for scanned pages, where the content is not embedded images but the
+    page itself. Without this a scanned PDF is simply unusable, which is the
+    single most common complaint about document RAG.
+    """
+    try:
+        pixmap = page.get_pixmap(dpi=_RENDER_DPI)
+        blob = pixmap.tobytes("png")
+    except Exception as exc:
+        logger.debug("could not render page %s: %s", page_number, exc)
+        return None
+
+    return ExtractedImage(
+        data=blob,
+        mime_type="image/png",
+        order=order,
+        page_number=page_number,
+        width=pixmap.width,
+        height=pixmap.height,
+        content_hash=content_hash(blob.hex()),
+    )
 
 
 def _rect_overlap_ratio(
@@ -273,15 +353,31 @@ class PyMuPDFParser:
     ) -> ParsedDocument:
         all_lines: list[LineRecord] = []
         table_blocks: list[ParsedBlock] = []
+        images: list[ExtractedImage] = []
         order = 0
 
         with fitz.open(path) as doc:
             page_count = doc.page_count
             metadata = dict(doc.metadata or {})
             for index in range(page_count):
-                lines, tables, order = _extract_page(doc[index], index + 1, order)
+                page = doc[index]
+                page_number = index + 1
+                lines, tables, order = _extract_page(page, page_number, order)
                 all_lines.extend(lines)
                 table_blocks.extend(tables)
+
+                page_text = sum(len(line.text) for line in lines)
+                if page_text < _SCANNED_PAGE_CHARS:
+                    # Nothing readable here. Render the page itself rather than
+                    # hunting for embedded images that may not exist.
+                    rendered = _render_page(page, page_number, order)
+                    if rendered is not None:
+                        images.append(rendered)
+                        order += 1
+                else:
+                    found = _extract_page_images(page, doc, page_number, order)
+                    images.extend(found)
+                    order += len(found)
 
         # Heading levels are decided across the whole document, not per page,
         # so a given size means the same thing on page 1 and on page 90.
@@ -295,6 +391,7 @@ class PyMuPDFParser:
             filename=filename,
             kind=DocumentKind.PDF,
             blocks=blocks,
+            images=images,
             page_count=page_count,
             parser=self.name,
             metadata={
@@ -302,6 +399,7 @@ class PyMuPDFParser:
                 "author": metadata.get("author") or None,
                 "heading_count": sum(1 for b in blocks if b.type == BlockType.HEADING),
                 "table_count": len(table_blocks),
+                "image_count": len(images),
             },
         )
 

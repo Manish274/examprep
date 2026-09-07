@@ -63,6 +63,9 @@ class ChunkResponse(BaseModel):
     char_start: int | None
     char_end: int | None
     content_hash: str
+    # "text" or "vision" -- generated content is marked all the way to
+    # the citation the student sees.
+    source: str
 
     @classmethod
     def from_chunk(cls, chunk: Chunk) -> ChunkResponse:
@@ -80,6 +83,7 @@ class ChunkResponse(BaseModel):
             char_start=meta.char_start,
             char_end=meta.char_end,
             content_hash=meta.content_hash,
+            source=meta.source.value,
         )
 
 
@@ -92,6 +96,7 @@ class IngestResponse(BaseModel):
     chunker: str
     indexed: int
     cache_hits: int
+    vision: dict[str, int]
     timings: dict[str, int]
     metadata: dict[str, Any]
     chunks: list[ChunkResponse]
@@ -131,6 +136,7 @@ async def ingest(
             embedder=container.embedder,
             sparse_encoder=container.sparse_encoder,
             store=container.store,
+            vision=container.vision,
         )
     except UnsupportedDocumentError as exc:
         raise HTTPException(
@@ -162,6 +168,7 @@ async def ingest(
         chunker=result.chunker_name,
         indexed=result.indexed,
         cache_hits=result.cache_hits,
+        vision=result.vision,
         timings=result.timings,
         metadata=result.document.metadata,
         chunks=[ChunkResponse.from_chunk(c) for c in result.chunks],
@@ -230,10 +237,12 @@ async def preview(
         kind=request.kind,
         settings=settings,
         chunker_name=request.chunker,
+        vision=get_container().vision,
     )
 
     return {
         "chunker": result.chunker_name,
+        "vision": result.vision,
         "chunk_count": len(result.chunks),
         "timings": result.timings,
         "chunks": [
@@ -243,6 +252,7 @@ async def preview(
                 "page": c.metadata.page_number,
                 "slide": c.metadata.slide_number,
                 "heading_path": c.metadata.heading_path,
+                "source": c.metadata.source.value,
                 "text": c.text,
             }
             for c in result.chunks[: request.limit]

@@ -56,6 +56,17 @@ class Settings(BaseSettings):
     JINA_API_KEY: str = ""
     RERANKER_MAX_RPM: int = 60
 
+    # ── vision ───────────────────────────────────────────────
+    # Reads content out of images: screenshotted tables, pasted formulas,
+    # diagrams, and scanned PDF pages that carry no text layer at all.
+    VISION_PROVIDER: str = "noop"
+    VISION_MODEL: str = "gemini-3.5-flash-lite"
+    VISION_MAX_RPM: int = 15
+    # Below this an image is decoration -- a bullet glyph, a rule, a logo.
+    VISION_MIN_PIXELS: int = 40000
+    # Ceiling per document, so one pathological file cannot drain a day.
+    VISION_MAX_IMAGES: int = 40
+
     # ── free-tier rate limiting ──────────────────────────────
     EMBEDDING_MAX_RPM: int = 100
     EMBEDDING_BATCH_SIZE: int = 64

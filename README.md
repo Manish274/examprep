@@ -151,6 +151,7 @@ behind an interface, and all of them are free-tier.
 | Generation | `gemini-3.8-flash` | any OpenAI-compatible host, Ollama |
 | Reranking | `jina-reranker-v2` | Gemini listwise, no-op baseline |
 | Sparse | BM25 | — |
+| Vision | `gemini-3.5-flash-lite` | any Gemini multimodal model, no-op |
 
 BM25 needs no model at all: term frequency, IDF and stemming, running locally.
 
@@ -179,6 +180,33 @@ curl -s "http://localhost:8000/retrieve/stats" -H "x-internal-token: dev_interna
 
 Answers the first question when retrieval returns nothing: is the corpus empty,
 or is the query bad?
+
+---
+
+## Reading content out of images
+
+Lecture material routinely puts substantive content in pictures — a table
+screenshotted from a textbook, a formula pasted as an image, a scanned page.
+None of it survives text extraction, so a student asking about it gets nothing
+back from a document that plainly contains the answer.
+
+`VISION_PROVIDER=gemini` sends those images to a multimodal model, which
+transcribes text and tables verbatim and describes real diagrams. It uses the
+key the pipeline already holds, so it adds no new credential.
+
+Two filters keep the quota honest, because every image costs a call:
+
+- images below `VISION_MIN_PIXELS` are decoration — bullets, rules, logos
+- identical images are described once, so a logo repeated on 60 slides costs
+  one call rather than 60
+
+**Image-derived text is marked as generated, not extracted.** Chunks carry
+`source="vision"`, and the citation reads *"… · read from an image"*. A
+mis-transcribed formula must never be indistinguishable from the document's own
+words — that is the failure mode this whole project is built to avoid.
+
+Scanned PDFs are handled by the same path: a page with no text layer is
+rendered and read as an image rather than rejected.
 
 ---
 

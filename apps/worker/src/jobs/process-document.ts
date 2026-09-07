@@ -69,6 +69,7 @@ export async function processDocument(
         chunks: result.chunk_count,
         indexed: result.indexed,
         cacheHits: result.cache_hits,
+        vision: result.vision,
         parser: result.parser,
         timings: result.timings,
       },
@@ -110,6 +111,7 @@ export async function processDocument(
               headingPath: chunk.heading_path,
               charStart: chunk.char_start,
               charEnd: chunk.char_end,
+              source: chunk.source,
             })),
           );
         await report(
@@ -130,6 +132,7 @@ export async function processDocument(
         blockCount: result.block_count,
         indexed: result.indexed,
         cacheHits: result.cache_hits,
+        vision: result.vision,
         timings: result.timings,
         ...result.metadata,
       },

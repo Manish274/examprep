@@ -12,6 +12,7 @@ notes, and dropping it would lose the most useful text in the file.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 from pathlib import Path
 from typing import Any
@@ -19,9 +20,15 @@ from typing import Any
 from pptx import Presentation
 from pptx.enum.shapes import MSO_SHAPE_TYPE
 
-from app.core.models import BlockType, DocumentKind, ParsedBlock, ParsedDocument
+from app.core.models import (
+    BlockType,
+    DocumentKind,
+    ExtractedImage,
+    ParsedBlock,
+    ParsedDocument,
+)
 from app.core.registry import parsers
-from app.core.text import normalize
+from app.core.text import content_hash, normalize
 
 logger = logging.getLogger(__name__)
 
@@ -96,11 +103,42 @@ class PythonPptxParser:
     def supports(self, kind: DocumentKind) -> bool:
         return kind in {DocumentKind.PPTX, DocumentKind.PPT}
 
+    @staticmethod
+    def _extract_image(
+        shape: Any, slide_number: int, order: int
+    ) -> ExtractedImage | None:
+        """Pulls the picture bytes and its natural size.
+
+        Natural pixel size is used rather than the size it was scaled to on the
+        slide: a large diagram shrunk into a corner is still a large diagram,
+        and a tiny logo stretched across a slide is still a logo.
+        """
+        try:
+            image = shape.image
+        except (AttributeError, ValueError):
+            return None
+
+        width, height = 0, 0
+        with contextlib.suppress(AttributeError, ValueError, TypeError):
+            width, height = image.size
+
+        blob = image.blob
+        return ExtractedImage(
+            data=blob,
+            mime_type=f"image/{image.ext}" if image.ext else "image/png",
+            order=order,
+            slide_number=slide_number,
+            width=width,
+            height=height,
+            content_hash=content_hash(blob.hex()),
+        )
+
     def _parse_sync(
         self, path: Path, document_id: str, filename: str
     ) -> ParsedDocument:
         presentation = Presentation(str(path))
         blocks: list[ParsedBlock] = []
+        images: list[ExtractedImage] = []
         order = 0
         notes_count = 0
         table_count = 0
@@ -148,6 +186,12 @@ class PythonPptxParser:
                         continue
 
                     if shape.shape_type == MSO_SHAPE_TYPE.PICTURE:
+                        # Held aside for the vision stage; parsers stay free of
+                        # API calls.
+                        extracted = self._extract_image(shape, slide_number, order)
+                        if extracted is not None:
+                            images.append(extracted)
+                            order += 1
                         continue
 
                     if shape.has_text_frame:
@@ -174,18 +218,28 @@ class PythonPptxParser:
                     order += 1
                     notes_count += 1
 
+        # Give each image the slide's own text, so the vision model can tell a
+        # decorative graphic from the diagram the slide is explaining.
+        by_slide: dict[int | None, list[str]] = {}
+        for block in blocks:
+            by_slide.setdefault(block.slide_number, []).append(block.text)
+        for image in images:
+            image.context_hint = " ".join(by_slide.get(image.slide_number, []))[:400]
+
         slide_count = len(presentation.slides)
         return ParsedDocument(
             document_id=document_id,
             filename=filename,
             kind=DocumentKind.PPTX,
             blocks=blocks,
+            images=images,
             page_count=slide_count,
             parser=self.name,
             metadata={
                 "slide_count": slide_count,
                 "notes_count": notes_count,
                 "table_count": table_count,
+                "image_count": len(images),
             },
         )
 

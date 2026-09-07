@@ -22,7 +22,13 @@ from collections.abc import Sequence
 
 from qdrant_client import AsyncQdrantClient, models
 
-from app.core.models import Chunk, ChunkMetadata, ScoredChunk, SparseVector
+from app.core.models import (
+    Chunk,
+    ChunkMetadata,
+    ContentSource,
+    ScoredChunk,
+    SparseVector,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -119,6 +125,7 @@ class QdrantStore:
             "char_start": meta.char_start,
             "char_end": meta.char_end,
             "content_hash": meta.content_hash,
+            "source": meta.source.value,
         }
 
     async def upsert_chunks(
@@ -214,6 +221,7 @@ class QdrantStore:
                 char_start=payload.get("char_start"),
                 char_end=payload.get("char_end"),
                 content_hash=str(payload.get("content_hash", "")),
+                source=ContentSource(payload.get("source") or "text"),
             ),
         )
         return ScoredChunk(

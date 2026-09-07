@@ -28,6 +28,22 @@ class BlockType(str, Enum):
     TABLE = "table"
     CAPTION = "caption"
     SPEAKER_NOTE = "speaker_note"
+    # Content read out of an image by a vision model rather than extracted
+    # from the file. Kept distinct because it is generated, not quoted.
+    FIGURE = "figure"
+
+
+class ContentSource(str, Enum):
+    """Where a chunk's text came from.
+
+    A vision transcription is the model's reading of a picture, not words
+    lifted from the document. Conflating the two would let a mis-transcribed
+    formula become an authoritative-looking citation, which is precisely the
+    failure this system exists to avoid.
+    """
+
+    TEXT = "text"
+    VISION = "vision"
 
 
 class ExplanationMode(str, Enum):
@@ -58,6 +74,32 @@ class ParsedBlock(BaseModel):
     font_size: float | None = None
     bbox: tuple[float, float, float, float] | None = None
     order: int = 0
+    source: ContentSource = ContentSource.TEXT
+
+
+class ExtractedImage(BaseModel):
+    """An image lifted from a document, awaiting a vision model.
+
+    Carried separately from blocks so parsers stay synchronous and free of API
+    calls; the enrichment stage turns these into FIGURE blocks.
+    """
+
+    data: bytes
+    mime_type: str = "image/png"
+    # Where the resulting block belongs in reading order.
+    order: int = 0
+    page_number: int | None = None
+    slide_number: int | None = None
+    width: int = 0
+    height: int = 0
+    content_hash: str = ""
+    # Nearby text, given to the vision model so it can tell a decorative logo
+    # from a diagram the surrounding slide is explaining.
+    context_hint: str = ""
+
+    @property
+    def pixels(self) -> int:
+        return self.width * self.height
 
 
 class ParsedDocument(BaseModel):
@@ -67,6 +109,7 @@ class ParsedDocument(BaseModel):
     filename: str
     kind: DocumentKind
     blocks: list[ParsedBlock] = Field(default_factory=list)
+    images: list[ExtractedImage] = Field(default_factory=list)
     page_count: int = 0
     parser: str = "unknown"
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -86,6 +129,7 @@ class ChunkMetadata(BaseModel):
     char_start: int | None = None
     char_end: int | None = None
     content_hash: str
+    source: ContentSource = ContentSource.TEXT
 
 
 class Chunk(BaseModel):

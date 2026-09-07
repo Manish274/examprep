@@ -26,7 +26,7 @@ import re
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 
-from app.core.models import ScoredChunk, Source
+from app.core.models import ContentSource, ScoredChunk, Source
 from app.core.tokenizer import TokenCounter, get_token_counter
 
 logger = logging.getLogger(__name__)
@@ -92,6 +92,11 @@ def _location(source_meta: ScoredChunk) -> str:
         parts.append(f"slide {meta.slide_number}")
     if meta.heading_path:
         parts.append(" › ".join(meta.heading_path))
+    if meta.source is ContentSource.VISION:
+        # Says plainly that this text was read out of a picture rather than
+        # lifted from the file, both in the prompt and in the citation the
+        # student sees.
+        parts.append("read from an image")
     return " · ".join(parts)
 
 

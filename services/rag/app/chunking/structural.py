@@ -22,6 +22,7 @@ from app.core.models import (
     BlockType,
     Chunk,
     ChunkMetadata,
+    ContentSource,
     ParsedBlock,
     ParsedDocument,
 )
@@ -126,9 +127,15 @@ class StructuralChunker:
     def _to_pieces(self, block: ParsedBlock, offset: int) -> list[_Piece]:
         text = block.text.strip()
 
-        # Tables and speaker notes are kept whole: a table loses its meaning
-        # when split across chunks, and a note is a single coherent thought.
-        if block.type in {BlockType.TABLE, BlockType.SPEAKER_NOTE}:
+        # Tables, speaker notes and figure descriptions are kept whole: a
+        # table loses its meaning when split, a note is a single thought, and
+        # splitting a transcribed image would mix generated text with extracted
+        # text inside one chunk, making its provenance unrepresentable.
+        if block.type in {
+            BlockType.TABLE,
+            BlockType.SPEAKER_NOTE,
+            BlockType.FIGURE,
+        }:
             return [
                 _Piece(
                     text=text,
@@ -347,6 +354,17 @@ class StructuralChunker:
                         char_start=pieces[0].char_start,
                         char_end=pieces[-1].char_end,
                         content_hash=content_hash(text),
+                        # A chunk is vision-derived only if every piece in it
+                        # is; a mixed chunk would misrepresent the extracted
+                        # half as generated or the reverse.
+                        source=(
+                            ContentSource.VISION
+                            if all(
+                                p.block.source is ContentSource.VISION
+                                for p in pieces
+                            )
+                            else ContentSource.TEXT
+                        ),
                     ),
                 )
             )

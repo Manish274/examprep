@@ -60,6 +60,7 @@ class RetrievedChunkResponse(BaseModel):
     section: str | None
     heading: str | None
     heading_path: list[str]
+    source: str
 
     @classmethod
     def from_scored(cls, scored: ScoredChunk) -> RetrievedChunkResponse:
@@ -83,6 +84,7 @@ class RetrievedChunkResponse(BaseModel):
             section=meta.section,
             heading=meta.heading,
             heading_path=meta.heading_path,
+            source=meta.source.value,
         )
 
 

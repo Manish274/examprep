@@ -30,6 +30,13 @@ export const documentStatusEnum = pgEnum("document_status", [
 
 export const documentKindEnum = pgEnum("document_kind", ["pdf", "pptx", "ppt"]);
 
+/**
+ * Where a chunk's text came from. A vision transcription is a model's
+ * reading of a picture, not words lifted from the file; conflating the two
+ * would let a mis-transcribed formula become an authoritative citation.
+ */
+export const contentSourceEnum = pgEnum("content_source", ["text", "vision"]);
+
 export const messageRoleEnum = pgEnum("message_role", [
   "user",
   "assistant",
@@ -166,6 +173,7 @@ export const documentChunks = pgTable(
     text: text("text").notNull(),
     tokenCount: integer("token_count").notNull(),
     contentHash: varchar("content_hash", { length: 64 }).notNull(),
+    source: contentSourceEnum("source").notNull().default("text"),
 
     // ── preserved metadata, surfaced as citations ──
     pageNumber: integer("page_number"),

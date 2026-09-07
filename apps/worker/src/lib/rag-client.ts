@@ -14,6 +14,8 @@ export interface RagChunk {
   char_start: number | null;
   char_end: number | null;
   content_hash: string;
+  /** "text" or "vision" — vision content is model-generated. */
+  source: "text" | "vision";
 }
 
 export interface IngestResponse {
@@ -22,6 +24,8 @@ export interface IngestResponse {
   indexed: number;
   /** Embeddings served from cache rather than the provider. */
   cache_hits: number;
+  /** Counts from the image-reading pass. */
+  vision: Record<string, number>;
   page_count: number;
   block_count: number;
   chunk_count: number;

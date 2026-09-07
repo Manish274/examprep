@@ -38,6 +38,11 @@ from app.retrieval.retrievers import (
     RetrievalService,
     SparseRetriever,
 )
+from app.vision.providers import (
+    GeminiVisionProvider,
+    MockVisionProvider,
+    NoOpVisionProvider,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -111,6 +116,37 @@ def build_reranker(settings: Settings) -> object:
     )
 
 
+def build_vision(settings: Settings) -> object:
+    """Selects the vision provider.
+
+    Defaults to noop, which is exactly the behaviour before images were read at
+    all -- so enabling it is a deliberate choice rather than a surprise on the
+    quota bill.
+    """
+    provider = settings.VISION_PROVIDER.lower()
+
+    if provider == "noop":
+        return NoOpVisionProvider()
+    if provider == "mock":
+        return MockVisionProvider()
+    if provider == "gemini":
+        if not settings.GEMINI_API_KEY:
+            raise RuntimeError(
+                "VISION_PROVIDER=gemini but GEMINI_API_KEY is empty. "
+                "Set the key or switch the provider to 'noop'."
+            )
+        return GeminiVisionProvider(
+            settings.GEMINI_API_KEY,
+            model_id=settings.VISION_MODEL,
+            max_rpm=settings.VISION_MAX_RPM,
+        )
+
+    raise ValueError(
+        f"Unknown VISION_PROVIDER '{settings.VISION_PROVIDER}'. "
+        "Available: noop, mock, gemini"
+    )
+
+
 class Container:
     """Holds the wired pipeline and owns the lifetimes of its clients."""
 
@@ -119,6 +155,7 @@ class Container:
         self.embedder = build_embedder(settings)
         self.sparse_encoder = Bm25Encoder()
         self.reranker = build_reranker(settings)
+        self.vision = build_vision(settings)
         self.context_builder = ContextBuilder(
             max_tokens=settings.CONTEXT_MAX_TOKENS,
             max_chunks=settings.CONTEXT_TOP_N,
