@@ -266,6 +266,27 @@ class QdrantStore:
         )
         return [self._to_scored(p, dense_score=False) for p in response.points]
 
+    async def sample_chunks(
+        self,
+        *,
+        user_id: str,
+        document_ids: Sequence[str] | None = None,
+        limit: int = 25,
+    ) -> list[Chunk]:
+        """Reads indexed chunks back out, for gold-set generation.
+
+        Scrolls rather than searches: this wants a representative sample of the
+        corpus, not the answer to any particular question.
+        """
+        points, _ = await self._client.scroll(
+            collection_name=self._collection,
+            scroll_filter=self._filter(user_id, document_ids),
+            limit=limit,
+            with_payload=True,
+            with_vectors=False,
+        )
+        return [self._to_scored(p, dense_score=True).chunk for p in points]
+
     async def count(self, *, user_id: str | None = None) -> int:
         result = await self._client.count(
             collection_name=self._collection,

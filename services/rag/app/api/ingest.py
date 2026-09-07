@@ -168,6 +168,37 @@ async def ingest(
     )
 
 
+class DeleteRequest(BaseModel):
+    document_id: str
+    user_id: str
+
+
+@router.post("/documents/delete")
+async def delete_document(request: DeleteRequest) -> dict[str, Any]:
+    """Removes a document's vectors from the index.
+
+    Called when a student deletes a document. Without it the Postgres rows and
+    the stored file go away while the vectors remain, and the deleted material
+    keeps answering that student's questions -- which is both wrong and, for
+    someone who deleted a document deliberately, a breach of the expectation
+    that deleting means deleted.
+
+    Scoped by user id so a document id alone cannot remove another user's
+    vectors.
+    """
+    container = get_container()
+    before = await container.store.count(user_id=request.user_id)
+    await container.store.delete_document(
+        request.document_id, user_id=request.user_id
+    )
+    after = await container.store.count(user_id=request.user_id)
+
+    logger.info(
+        "removed %s vectors for document %s", before - after, request.document_id
+    )
+    return {"document_id": request.document_id, "removed": before - after}
+
+
 class PreviewRequest(BaseModel):
     storage_key: str
     filename: str

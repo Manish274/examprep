@@ -54,6 +54,7 @@ class Settings(BaseSettings):
     LLM_UTILITY_MODEL: str = "gemini-2.5-flash-lite"
     RERANKER_PROVIDER: str = "noop"
     JINA_API_KEY: str = ""
+    RERANKER_MAX_RPM: int = 60
 
     # ── free-tier rate limiting ──────────────────────────────
     EMBEDDING_MAX_RPM: int = 100

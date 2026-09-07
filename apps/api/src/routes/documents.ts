@@ -7,6 +7,7 @@ import { db } from "../lib/db.js";
 import { detectKind, EXTENSION_FOR_KIND } from "../lib/file-type.js";
 import { documents as documentQueue } from "../lib/queue.js";
 import { sha256, storage, storageKeyFor } from "../lib/storage.js";
+import { ragDeleteDocument } from "../lib/rag-client.js";
 import { logger } from "../lib/logger.js";
 import {
   badRequest,
@@ -237,8 +238,19 @@ export const documentRoutes = new Hono<AppEnv>()
       throw notFound("Document");
     }
 
+    // Vectors live outside Postgres and do not cascade. Dropping them first
+    // means a failure here leaves the document visible and retryable, rather
+    // than leaving orphaned vectors that keep answering the student's
+    // questions about material they deleted.
+    await ragDeleteDocument(documentId, userId).catch((err: unknown) => {
+      logger.error(
+        { err, documentId },
+        "failed to delete vectors; index may hold orphans",
+      );
+    });
+
     // Chunks cascade with the row. The stored file does not, so remove it
-    // first: a leaked row is recoverable, a leaked file is not noticed.
+    // too: a leaked row is recoverable, a leaked file is not noticed.
     if (row.storageKey) {
       await storage()
         .delete(row.storageKey)

@@ -125,3 +125,39 @@ class TestTokenCounter:
         # must behave consistently rather than merely not crash.
         counter = HeuristicTokenCounter()
         assert counter.count("a" * 400) == counter.count("b" * 400) == 100
+
+
+class TestChunkId:
+    def test_is_deterministic_for_the_same_content(self) -> None:
+        # Random ids would be regenerated on every ingest, silently
+        # invalidating any gold set that references them.
+        from app.core.text import chunk_id_for
+
+        assert chunk_id_for("doc-1", "A relation is in 3NF.") == chunk_id_for(
+            "doc-1", "A relation is in 3NF."
+        )
+
+    def test_differs_across_documents(self) -> None:
+        from app.core.text import chunk_id_for
+
+        assert chunk_id_for("doc-1", "same text") != chunk_id_for("doc-2", "same text")
+
+    def test_differs_for_different_content(self) -> None:
+        from app.core.text import chunk_id_for
+
+        assert chunk_id_for("doc-1", "2NF") != chunk_id_for("doc-1", "3NF")
+
+    def test_survives_cosmetic_whitespace_changes(self) -> None:
+        # Re-parsing can shift whitespace without changing meaning; a gold set
+        # should survive that.
+        from app.core.text import chunk_id_for
+
+        assert chunk_id_for("d", "a  b") == chunk_id_for("d", "a b")
+
+    def test_is_a_valid_uuid(self) -> None:
+        # Qdrant point ids must be a UUID or an unsigned integer.
+        import uuid as uuid_module
+
+        from app.core.text import chunk_id_for
+
+        uuid_module.UUID(chunk_id_for("doc-1", "text"))

@@ -16,7 +16,6 @@ would reintroduce exactly the contamination rule 1 exists to prevent.
 
 from __future__ import annotations
 
-import uuid
 from dataclasses import dataclass, field
 
 from app.core.models import (
@@ -27,7 +26,7 @@ from app.core.models import (
     ParsedDocument,
 )
 from app.core.registry import chunkers
-from app.core.text import content_hash, split_sentences
+from app.core.text import chunk_id_for, content_hash, split_sentences
 from app.core.tokenizer import TokenCounter, get_token_counter
 from app.parsing.structure import HeadingStack
 
@@ -333,7 +332,7 @@ class StructuralChunker:
             first = pieces[0].block
             chunks.append(
                 Chunk(
-                    id=str(uuid.uuid4()),
+                    id=chunk_id_for(document.document_id, text),
                     text=text,
                     token_count=self._counter.count(text),
                     metadata=ChunkMetadata(

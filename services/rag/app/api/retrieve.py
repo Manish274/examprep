@@ -46,6 +46,9 @@ class RetrievedChunkResponse(BaseModel):
     dense_score: float | None
     sparse_score: float | None
     rrf_score: float | None
+    # Present only for hybrid_rerank. Without it there is no way to tell a
+    # reranked result from one where the reranker silently fell back.
+    rerank_score: float | None
     dense_rank: int | None
     sparse_rank: int | None
 
@@ -69,6 +72,7 @@ class RetrievedChunkResponse(BaseModel):
             dense_score=scored.dense_score,
             sparse_score=scored.sparse_score,
             rrf_score=scored.rrf_score,
+            rerank_score=scored.rerank_score,
             dense_rank=scored.dense_rank,
             sparse_rank=scored.sparse_rank,
             document_id=meta.document_id,

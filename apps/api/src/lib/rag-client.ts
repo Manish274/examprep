@@ -67,5 +67,25 @@ export interface RagHealth {
   providers: Record<string, string>;
 }
 
+/**
+ * Drops a document's vectors from the index.
+ *
+ * Deleting the Postgres rows without this leaves the vectors behind, and the
+ * deleted material keeps answering the student's questions.
+ */
+export const ragDeleteDocument = (
+  documentId: string,
+  userId: string,
+  options?: RagRequestOptions,
+): Promise<{ document_id: string; removed: number }> =>
+  ragFetch(
+    "/documents/delete",
+    {
+      method: "POST",
+      body: JSON.stringify({ document_id: documentId, user_id: userId }),
+    },
+    { timeoutMs: 30_000, ...options },
+  );
+
 export const ragHealth = (options?: RagRequestOptions): Promise<RagHealth> =>
   ragFetch<RagHealth>("/health", { method: "GET" }, { timeoutMs: 5_000, ...options });

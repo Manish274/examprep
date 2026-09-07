@@ -15,15 +15,15 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the decision record.
 
 ## Status
 
-**Milestone 2 — Retrieval. Complete.**
+**Milestone 3 — Reranking and evaluation. Complete.**
 
 | Milestone | Scope | State |
 | --- | --- | --- |
 | 0 | Monorepo, infra, schema, service skeletons, test harness | done |
 | 1 | Document ingestion, chunking, metadata preservation | done |
 | 2 | Embeddings, Qdrant index, BM25, hybrid search, RRF | done |
-| 3 | Reranking, context construction, eval harness | next |
-| 4 | LLM provider, grounded chat, WebSocket streaming | |
+| 3 | Reranking, context construction, eval harness | done |
+| 4 | LLM provider, grounded chat, WebSocket streaming | next |
 | 5 | Test generation, grading, flashcards | |
 | 6 | Tracing, gold-set generation, retrieval metrics | |
 
@@ -149,7 +149,7 @@ behind an interface, and all of them are free-tier.
 | --- | --- | --- |
 | Embeddings | `gemini-embedding-2` @ 3072 dims | mock, Jina, Voyage |
 | Generation | `gemini-3.8-flash` | any OpenAI-compatible host, Ollama |
-| Reranking | `jina-reranker-v2` (Milestone 3) | Cohere, Gemini listwise, no-op |
+| Reranking | `jina-reranker-v2` | Gemini listwise, no-op baseline |
 | Sparse | BM25 | — |
 
 BM25 needs no model at all: term frequency, IDF and stemming, running locally.
@@ -179,6 +179,37 @@ curl -s "http://localhost:8000/retrieve/stats" -H "x-internal-token: dev_interna
 
 Answers the first question when retrieval returns nothing: is the corpus empty,
 or is the query bad?
+
+---
+
+## Measuring retrieval
+
+Retrieval quality is measured, not asserted. The harness runs a gold set
+through all four strategies and prints them side by side:
+
+```bash
+cd services/rag && .venv/Scripts/python.exe scripts/evaluate.py --user <id> --gold gold_sets/study-guide.jsonl
+```
+
+```
+strategy             recall@5  precision@5          mrr       ndcg@5        hit@5       ms
+```
+
+A starting gold set can be generated from indexed chunks:
+
+```bash
+curl -s -X POST http://localhost:8000/eval/gold-set -H "content-type: application/json" -H "x-internal-token: dev_internal_token_change_me" -d '{"user_id":"<id>","limit":20,"output_path":"gold_sets/mine.jsonl"}'
+```
+
+Read the synthetic numbers as a **relative** comparison between strategies on
+identical data, never as an absolute quality score: the questions are written
+*from* the passages, which reuses their vocabulary and flatters keyword
+retrieval. A hand-written gold set is worth far more.
+
+Chunk ids are derived from `(document_id, sha256(text))` rather than generated
+randomly, so reprocessing a document — a retry, a chunker change, a worker
+rerun — keeps a gold set valid. Re-*uploading* the file creates a new document
+id and therefore new chunk ids, so a gold set is tied to one upload.
 
 ---
 

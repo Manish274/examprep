@@ -356,3 +356,87 @@ class TestIndexing:
             },
         )
         assert await get_container().store.count() == 0
+
+
+class TestVectorDeletion:
+    """Deleting a document must remove its vectors. Without this the Postgres
+    rows go away while the index keeps answering questions from material the
+    student deliberately deleted."""
+
+    async def test_removes_the_documents_vectors(
+        self, client: httpx.AsyncClient
+    ) -> None:
+        from app.container import get_container
+
+        body = (await client.post("/ingest", json=_pdf_body())).json()
+        store = get_container().store
+        assert await store.count(user_id=USER) == body["chunk_count"]
+
+        response = await client.post(
+            "/documents/delete", json={"document_id": "doc-1", "user_id": USER}
+        )
+
+        assert response.status_code == 200
+        assert response.json()["removed"] == body["chunk_count"]
+        assert await store.count(user_id=USER) == 0
+
+    async def test_leaves_other_documents_intact(
+        self, client: httpx.AsyncClient
+    ) -> None:
+        from app.container import get_container
+
+        await client.post("/ingest", json=_pdf_body())
+        deck = await client.post(
+            "/ingest",
+            json=_pdf_body(
+                document_id="doc-2",
+                filename="indexing.pptx",
+                kind="pptx",
+                storage_key="user-1/indexing.pptx",
+            ),
+        )
+        await client.post(
+            "/documents/delete", json={"document_id": "doc-1", "user_id": USER}
+        )
+
+        store = get_container().store
+        assert await store.count(user_id=USER) == deck.json()["chunk_count"]
+
+    async def test_cannot_delete_another_users_vectors(
+        self, client: httpx.AsyncClient
+    ) -> None:
+        # A document id alone must not be enough; the filter is scoped by user.
+        from app.container import get_container
+
+        body = (await client.post("/ingest", json=_pdf_body())).json()
+        response = await client.post(
+            "/documents/delete",
+            json={"document_id": "doc-1", "user_id": "someone-else"},
+        )
+
+        assert response.json()["removed"] == 0
+        assert await get_container().store.count(user_id=USER) == body["chunk_count"]
+
+    async def test_deleting_an_unknown_document_is_harmless(
+        self, client: httpx.AsyncClient
+    ) -> None:
+        # A retried cleanup must not fail on work that already succeeded.
+        response = await client.post(
+            "/documents/delete", json={"document_id": "never-existed", "user_id": USER}
+        )
+        assert response.status_code == 200
+        assert response.json()["removed"] == 0
+
+
+class TestDeterministicChunkIds:
+    async def test_reingesting_produces_identical_chunk_ids(
+        self, client: httpx.AsyncClient
+    ) -> None:
+        # Random ids would be regenerated on every ingest, silently
+        # invalidating every gold set that references them.
+        first = (await client.post("/ingest", json=_pdf_body())).json()
+        second = (await client.post("/ingest", json=_pdf_body())).json()
+
+        assert [c["id"] for c in first["chunks"]] == [
+            c["id"] for c in second["chunks"]
+        ]

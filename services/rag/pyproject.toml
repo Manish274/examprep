@@ -17,7 +17,10 @@ target-version = "py310"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "UP", "B", "SIM", "RUF"]
-ignore = ["B008"]  # FastAPI Depends() in defaults is idiomatic
+ignore = [
+    "B008",    # FastAPI Depends() in defaults is idiomatic
+    "RUF001",  # "›" in citation headers is a deliberate display choice
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

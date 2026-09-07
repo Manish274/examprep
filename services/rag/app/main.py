@@ -15,7 +15,7 @@ from typing import Any
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from app.api import health, ingest, retrieve
+from app.api import evaluate, health, ingest, retrieve
 from app.config import get_settings
 from app.container import Container, set_container
 
@@ -75,9 +75,10 @@ def create_app() -> FastAPI:
     app.include_router(health.router)
     app.include_router(ingest.router)
     app.include_router(retrieve.router)
+    app.include_router(evaluate.router)
 
     # Feature routers land here as milestones complete:
-    #   /chat  /generate/test  /generate/flashcards  /eval
+    #   /chat  /generate/test  /generate/flashcards
 
     @app.exception_handler(Exception)
     async def unhandled(request: Request, exc: Exception) -> JSONResponse:

@@ -23,6 +23,12 @@ from app.embedding.cache import (
 )
 from app.embedding.gemini import GeminiEmbeddingProvider
 from app.embedding.mock import MockEmbeddingProvider
+from app.generation.context import ContextBuilder
+from app.reranking.rerankers import (
+    GeminiListwiseReranker,
+    JinaReranker,
+    NoOpReranker,
+)
 from app.retrieval.bm25 import Bm25Encoder
 from app.retrieval.fusion import ReciprocalRankFusion
 from app.retrieval.qdrant_store import QdrantStore
@@ -70,6 +76,41 @@ def build_embedder(settings: Settings) -> object:
     return CachedEmbeddingProvider(inner, PostgresEmbeddingCache(settings.DATABASE_URL))
 
 
+def build_reranker(settings: Settings) -> object:
+    """Selects the reranker.
+
+    Defaults to noop rather than silently degrading to something weaker: a run
+    labelled "hybrid_rerank" that quietly did no reranking would corrupt every
+    evaluation comparison drawn from it.
+    """
+    provider = settings.RERANKER_PROVIDER.lower()
+
+    if provider == "noop":
+        return NoOpReranker()
+    if provider == "jina":
+        if not settings.JINA_API_KEY:
+            raise RuntimeError(
+                "RERANKER_PROVIDER=jina but JINA_API_KEY is empty. "
+                "Set the key or switch the provider to 'noop'."
+            )
+        return JinaReranker(settings.JINA_API_KEY, max_rpm=settings.RERANKER_MAX_RPM)
+    if provider == "gemini_listwise":
+        if not settings.GEMINI_API_KEY:
+            raise RuntimeError(
+                "RERANKER_PROVIDER=gemini_listwise but GEMINI_API_KEY is empty."
+            )
+        return GeminiListwiseReranker(
+            settings.GEMINI_API_KEY,
+            model_id=settings.LLM_UTILITY_MODEL,
+            max_rpm=settings.LLM_MAX_RPM,
+        )
+
+    raise ValueError(
+        f"Unknown RERANKER_PROVIDER '{settings.RERANKER_PROVIDER}'. "
+        "Available: noop, jina, gemini_listwise"
+    )
+
+
 class Container:
     """Holds the wired pipeline and owns the lifetimes of its clients."""
 
@@ -77,6 +118,11 @@ class Container:
         self.settings = settings
         self.embedder = build_embedder(settings)
         self.sparse_encoder = Bm25Encoder()
+        self.reranker = build_reranker(settings)
+        self.context_builder = ContextBuilder(
+            max_tokens=settings.CONTEXT_MAX_TOKENS,
+            max_chunks=settings.CONTEXT_TOP_N,
+        )
 
         self.qdrant = AsyncQdrantClient(
             url=settings.QDRANT_URL,
@@ -97,6 +143,8 @@ class Container:
             hybrid=HybridRetriever(
                 dense, sparse, ReciprocalRankFusion(k=settings.RRF_K)
             ),
+            reranker=self.reranker,
+            rerank_candidates=settings.RERANK_TOP_N,
         )
 
     async def startup(self) -> None:
@@ -148,5 +196,7 @@ def build_test_container(settings: Settings) -> Container:
             hybrid=HybridRetriever(
                 dense, sparse, ReciprocalRankFusion(k=settings.RRF_K)
             ),
+            reranker=container.reranker,
+            rerank_candidates=settings.RERANK_TOP_N,
         )
     return container

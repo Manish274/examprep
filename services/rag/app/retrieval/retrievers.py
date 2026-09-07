@@ -1,9 +1,7 @@
 """The four retrieval strategies the evaluation harness compares.
 
 Each satisfies the same interface, so the pipeline and the eval harness can
-swap between them by name without a branch anywhere else. Reranking is
-Milestone 3; HYBRID_RERANK currently resolves to hybrid, and the eval
-comparison it exists for lands with the reranker.
+swap between them by name without a branch anywhere else.
 """
 
 from __future__ import annotations
@@ -132,10 +130,18 @@ class RetrievalService:
         dense: DenseRetriever,
         sparse: SparseRetriever,
         hybrid: HybridRetriever,
+        reranker: object | None = None,
+        *,
+        rerank_candidates: int = 25,
     ) -> None:
         self.dense = dense
         self.sparse = sparse
         self.hybrid = hybrid
+        self.reranker = reranker
+        # How many fused candidates the reranker sees. Retrieving wide and
+        # reranking down is the whole point: a chunk that never enters this
+        # pool cannot be recovered by any amount of reranking.
+        self.rerank_candidates = rerank_candidates
 
     async def search(
         self,
@@ -157,15 +163,26 @@ class RetrievalService:
                 query, user_id=user_id, document_ids=document_ids, top_k=top_k
             )
 
-        # HYBRID and HYBRID_RERANK share a retrieval stage; the reranker is
-        # layered on top of these candidates in Milestone 3.
-        return await self.hybrid.search(
+        # Both hybrid modes share a retrieval stage. The reranked variant
+        # pulls a deliberately wider candidate pool, since its job is to pick
+        # well from many rather than to trust the fused order.
+        wants_rerank = (
+            strategy is RetrievalStrategy.HYBRID_RERANK and self.reranker is not None
+        )
+        candidates = await self.hybrid.search(
             query,
             user_id=user_id,
             document_ids=document_ids,
-            top_k=top_k,
+            top_k=max(self.rerank_candidates, top_k) if wants_rerank else top_k,
             dense_top_k=dense_top_k,
             sparse_top_k=sparse_top_k,
+        )
+
+        if not wants_rerank:
+            return candidates
+
+        return await self.reranker.rerank(  # type: ignore[attr-defined]
+            query, candidates, top_n=top_k
         )
 
 

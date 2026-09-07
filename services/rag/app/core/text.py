@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import re
 import unicodedata
+import uuid
 
 # Abbreviations whose trailing period does not end a sentence. Deliberately
 # short -- over-eager matching costs more than the occasional missed case.
@@ -118,3 +119,22 @@ def looks_like_heading(text: str) -> bool:
         return False
     capitalised = sum(1 for w in alpha_words if w[0].isupper())
     return capitalised / len(alpha_words) >= 0.7
+
+
+# Fixed namespace for deriving chunk ids. Arbitrary but must never change:
+# every stored chunk id and every gold set that references one depends on it.
+_CHUNK_NAMESPACE = uuid.UUID("6f2a1c94-3b7d-4e51-9a08-52d1f7c0e3b6")
+
+
+def chunk_id_for(document_id: str, text: str) -> str:
+    """Deterministic id for a chunk, derived from its document and content.
+
+    Random ids would be regenerated on every ingest, which silently invalidates
+    any gold set referencing them -- an evaluation run would then score against
+    ids that no longer exist and report zero for everything.
+
+    Deriving from content rather than position also means a chunker change only
+    moves the ids of chunks whose text actually changed, so a gold set survives
+    re-chunking wherever the passage did.
+    """
+    return str(uuid.uuid5(_CHUNK_NAMESPACE, f"{document_id}:{content_hash(text)}"))
