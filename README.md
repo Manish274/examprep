@@ -201,10 +201,14 @@ A starting gold set can be generated from indexed chunks:
 curl -s -X POST http://localhost:8000/eval/gold-set -H "content-type: application/json" -H "x-internal-token: dev_internal_token_change_me" -d '{"user_id":"<id>","limit":20,"output_path":"gold_sets/mine.jsonl"}'
 ```
 
-Read the synthetic numbers as a **relative** comparison between strategies on
-identical data, never as an absolute quality score: the questions are written
-*from* the passages, which reuses their vocabulary and flatters keyword
-retrieval. A hand-written gold set is worth far more.
+Read synthetic numbers as a **relative** comparison between strategies on
+identical data, never as an absolute quality score: questions written *from* a
+passage reuse its vocabulary and flatter keyword retrieval. A hand-written set
+is worth far more — see `scripts/build_reference_gold_set.py`.
+
+The first measured baseline is recorded in
+[docs/evaluation-baseline.md](docs/evaluation-baseline.md). It does **not**
+favour hybrid+reranking, which is why it is written down.
 
 Chunk ids are derived from `(document_id, sha256(text))` rather than generated
 randomly, so reprocessing a document — a retry, a chunker change, a worker
