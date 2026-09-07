@@ -10,6 +10,8 @@ import { chatRoutes } from "./routes/chat.js";
 import { testRoutes } from "./routes/tests.js";
 import { flashcardRoutes } from "./routes/flashcards.js";
 import { traceRoutes } from "./routes/traces.js";
+import { retrievalRoutes } from "./routes/retrieval.js";
+import { consoleRoutes } from "./routes/console.js";
 import { notFound } from "./lib/errors.js";
 import type { AppEnv } from "./types.js";
 
@@ -46,6 +48,9 @@ export function createApp() {
   app.route("/api/tests", testRoutes);
   app.route("/api/flashcards", flashcardRoutes);
   app.route("/api/traces", traceRoutes);
+  app.route("/api/retrieval", retrievalRoutes);
+  // A hand-testing console for the pipeline. Development only.
+  app.route("/", consoleRoutes);
 
   app.notFound(() => {
     throw notFound("Route");

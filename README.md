@@ -138,6 +138,42 @@ documented to return and what it actually returns. Regenerate them with:
 cd services/rag && .venv/Scripts/python.exe tests/fixtures/generate.py
 ```
 
+
+---
+
+## Testing it by hand
+
+A console for exercising the whole pipeline lives at
+**http://localhost:3001/console** once the API is running. It is served by the
+API itself rather than hosted separately, which is the point: same origin, so
+there is no CORS entry to maintain and the WebSocket upgrades with nothing
+loosened to let it. It speaks exactly the protocol the real frontend will.
+Development only -- the route 404s when `NODE_ENV=production`.
+
+```bash
+docker compose up -d
+cd services/rag && .venv/Scripts/python.exe -m uvicorn app.main:app --port 8000
+npm run dev:api
+npm run dev:worker
+```
+
+Six tabs, one per stage worth inspecting on its own:
+
+- **Documents** -- upload, then watch the stage and percentage arrive over the
+  socket. Open a document's chunks to see what retrieval will have to work with.
+- **Retrieval lab** -- one query, all four strategies side by side. A chunk
+  keeps the same colour in every column, so a passage only one retriever found
+  is obvious, and the header reports how many chunks all of them returned. When
+  that number equals the total, fusion has nothing to fuse and can only reorder.
+- **Chat** -- streaming answers with citations resolved to document, page and
+  heading. The message id next to each answer opens its trace.
+- **Tests & cards** -- generate, sit a paper, submit, read the grading.
+- **Traces** -- latency and errors by stage, or one operation span by span.
+
+The retrieval lab is the reason this exists. When an answer is wrong the first
+question is always whether the right passage was retrieved at all, and a chat
+transcript cannot answer that.
+
 ---
 
 ## Providers

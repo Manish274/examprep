@@ -244,3 +244,64 @@ export const gradeAnswers = (
     { method: "POST", body: JSON.stringify({ answers }) },
     { timeoutMs: 180_000, ...options },
   );
+
+/** One retrieved chunk, as the RAG service reports it. */
+export interface RagRetrievedChunk {
+  chunk_id: string;
+  text: string;
+  token_count: number;
+  score: number;
+  dense_score: number | null;
+  sparse_score: number | null;
+  rrf_score: number | null;
+  rerank_score: number | null;
+  dense_rank: number | null;
+  sparse_rank: number | null;
+  document_id: string;
+  document_name: string;
+  chunk_index: number;
+  page_number: number | null;
+  slide_number: number | null;
+  heading: string | null;
+  heading_path: string[];
+  source: string;
+}
+
+export interface RagRetrieveResponse {
+  query: string;
+  strategy: string;
+  count: number;
+  took_ms: number;
+  results: RagRetrievedChunk[];
+}
+
+/**
+ * Runs one retrieval strategy, scoped to a user.
+ *
+ * The user id is supplied by the caller from the verified token, never by the
+ * browser: it is the whole isolation boundary on the Python side.
+ */
+export const ragRetrieve = (
+  request: {
+    query: string;
+    userId: string;
+    strategy: string;
+    documentIds?: string[] | null;
+    topK?: number;
+  },
+  options: RagRequestOptions = {},
+): Promise<RagRetrieveResponse> =>
+  ragFetch(
+    "/retrieve",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        query: request.query,
+        user_id: request.userId,
+        strategy: request.strategy,
+        document_ids: request.documentIds ?? null,
+        top_k: request.topK ?? 10,
+      }),
+    },
+    { timeoutMs: 120_000, ...options },
+  );

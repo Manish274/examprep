@@ -22,3 +22,14 @@ export function repoRoot(): string {
 export function fromRepoRoot(path: string): string {
   return isAbsolute(path) ? path : resolve(repoRoot(), path);
 }
+
+/**
+ * Absolute path to this package (apps/api), source or built.
+ *
+ * Same trick and the same reason as repoRoot: src/lib/x.ts and dist/lib/x.js
+ * sit at the same depth, so one expression is correct under tsx and under node.
+ */
+export function packageRoot(): string {
+  const here = dirname(fileURLToPath(import.meta.url));
+  return resolve(here, "../..");
+}

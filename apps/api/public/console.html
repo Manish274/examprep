@@ -1,0 +1,1242 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>RAG Console</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #fbfbfa;
+    --panel: #ffffff;
+    --line: #e3e1dd;
+    --ink: #1d1c1a;
+    --muted: #6f6b64;
+    --accent: #b34a1f;
+    --accent-soft: #fdf1ea;
+    --good: #2e7d54;
+    --bad: #b3261e;
+    --warn: #8a6a12;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #16150f;
+      --panel: #1e1d17;
+      --line: #34322a;
+      --ink: #eceae4;
+      --muted: #9a958a;
+      --accent: #e5834f;
+      --accent-soft: #2a2018;
+      --good: #6cc08a;
+      --bad: #f08a80;
+      --warn: #d8b23f;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 14px/1.5 var(--sans);
+  }
+  code, .mono { font-family: var(--mono); font-size: 12px; }
+
+  header {
+    display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+    padding: 10px 18px; background: var(--panel);
+    border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 10;
+  }
+  header h1 { font-size: 15px; margin: 0; font-weight: 650; letter-spacing: -0.01em; }
+  header .spacer { flex: 1; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; background: var(--muted); }
+  .dot.up { background: var(--good); }
+  .dot.down { background: var(--bad); }
+  .health { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
+
+  nav { display: flex; gap: 2px; padding: 0 18px; background: var(--panel); border-bottom: 1px solid var(--line); overflow-x: auto; }
+  nav button {
+    background: none; border: none; border-bottom: 2px solid transparent;
+    padding: 9px 12px; font: inherit; font-size: 13px; color: var(--muted);
+    cursor: pointer; white-space: nowrap;
+  }
+  nav button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent); font-weight: 600; }
+
+  main { padding: 18px; max-width: 1500px; }
+  section[hidden] { display: none !important; }
+  h2 { font-size: 14px; margin: 0 0 4px; font-weight: 650; }
+  .hint { color: var(--muted); font-size: 12.5px; margin: 0 0 14px; max-width: 74ch; }
+
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 14px; margin-bottom: 14px; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: flex-end; }
+  .field { display: flex; flex-direction: column; gap: 3px; }
+  .field label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
+  input, select, textarea {
+    font: inherit; padding: 6px 8px; border: 1px solid var(--line);
+    border-radius: 5px; background: var(--bg); color: var(--ink); min-width: 0;
+  }
+  textarea { font-family: inherit; resize: vertical; }
+  input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  button.act {
+    font: inherit; font-weight: 600; padding: 6px 13px; border-radius: 5px;
+    border: 1px solid var(--accent); background: var(--accent); color: #fff; cursor: pointer;
+  }
+  button.act.ghost { background: transparent; color: var(--accent); }
+  button.act:disabled { opacity: 0.45; cursor: not-allowed; }
+  button.tiny { font-size: 12px; padding: 3px 8px; border-radius: 4px; border: 1px solid var(--line); background: transparent; color: var(--muted); cursor: pointer; }
+  button.tiny:hover { color: var(--ink); border-color: var(--accent); }
+
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); font-weight: 600; }
+  .scroll-x { overflow-x: auto; }
+
+  .tag { display: inline-block; font-size: 11px; padding: 1px 6px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+  .tag.good { color: var(--good); border-color: currentColor; }
+  .tag.bad { color: var(--bad); border-color: currentColor; }
+  .tag.warn { color: var(--warn); border-color: currentColor; }
+
+  .log { font-family: var(--mono); font-size: 11.5px; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 8px; max-height: 180px; overflow: auto; white-space: pre-wrap; }
+  .err { color: var(--bad); font-size: 12.5px; margin-top: 8px; white-space: pre-wrap; }
+
+  /* retrieval comparison */
+  .columns { display: flex; gap: 12px; align-items: flex-start; overflow-x: auto; padding-bottom: 6px; }
+  .col { flex: 1 1 300px; min-width: 300px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+  .col > h3 { margin: 0; padding: 8px 10px; border-bottom: 1px solid var(--line); font-size: 12px; display: flex; justify-content: space-between; gap: 8px; }
+  .hit { padding: 8px 10px; border-bottom: 1px solid var(--line); font-size: 12.5px; }
+  .hit:last-child { border-bottom: none; }
+  .hit .top { display: flex; gap: 6px; align-items: baseline; }
+  .hit .rank { font-family: var(--mono); font-size: 11px; color: var(--muted); min-width: 20px; }
+  .swatch { width: 8px; height: 8px; border-radius: 2px; display: inline-block; flex: none; margin-top: 5px; }
+  .hit .head { font-weight: 600; }
+  .hit .meta { color: var(--muted); font-size: 11px; font-family: var(--mono); }
+  .hit .snip { color: var(--muted); margin-top: 3px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+
+  /* chat */
+  .msg { padding: 10px 12px; border-radius: 8px; margin-bottom: 10px; border: 1px solid var(--line); background: var(--panel); }
+  .msg.user { background: var(--accent-soft); border-color: transparent; }
+  .msg .who { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin-bottom: 4px; }
+  .msg .body { white-space: pre-wrap; }
+  .msg .body.md { white-space: normal; }
+  .sources { margin-top: 8px; border-top: 1px dashed var(--line); padding-top: 6px; }
+  .src { font-size: 12px; color: var(--muted); padding: 2px 0; }
+  .src b { color: var(--ink); font-family: var(--mono); font-size: 11px; }
+  .md h4 { font-size: 13px; margin: 12px 0 4px; font-weight: 650; }
+  .md ul { margin: 4px 0; padding-left: 20px; }
+  .md li { margin: 2px 0; }
+  .md code { background: var(--bg); padding: 1px 4px; border-radius: 3px; }
+  .md br { line-height: 0.5; }
+  .cite { color: var(--accent); font-family: var(--mono); font-size: 11px; }
+  .caret { display: inline-block; width: 7px; height: 14px; background: var(--accent); vertical-align: text-bottom; animation: blink 1s steps(2) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  /* spans */
+  .span { display: grid; grid-template-columns: 130px 1fr 70px; gap: 8px; align-items: center; padding: 4px 0; font-size: 12.5px; border-bottom: 1px solid var(--line); }
+  .bar { height: 12px; border-radius: 3px; background: var(--accent); opacity: 0.75; min-width: 2px; }
+  .bar.failed { background: var(--bad); opacity: 1; }
+  .span .num { font-family: var(--mono); font-size: 11px; text-align: right; color: var(--muted); }
+  details.raw > summary { cursor: pointer; color: var(--muted); font-size: 11.5px; }
+  details.raw pre { font-family: var(--mono); font-size: 11px; overflow-x: auto; background: var(--bg); padding: 6px; border-radius: 4px; }
+
+  .qa { border: 1px solid var(--line); border-radius: 8px; padding: 12px; margin-bottom: 10px; background: var(--panel); }
+  .qa .prompt { font-weight: 600; margin-bottom: 8px; }
+  .qa label { display: block; padding: 3px 0; }
+  .feedback { margin-top: 8px; font-size: 12.5px; border-left: 2px solid var(--line); padding-left: 8px; color: var(--muted); }
+  .card-face { border: 1px solid var(--line); border-radius: 8px; padding: 12px; background: var(--panel); cursor: pointer; margin-bottom: 8px; }
+  .card-face .back { color: var(--muted); margin-top: 6px; }
+  .empty { color: var(--muted); font-size: 13px; padding: 10px 0; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>RAG Console</h1>
+  <span class="health"><span class="dot" id="api-dot"></span> api</span>
+  <span class="health"><span class="dot" id="rag-dot"></span> rag</span>
+  <span class="health"><span class="dot" id="ws-dot"></span> socket</span>
+  <span class="spacer"></span>
+  <span class="health mono" id="who">signed out</span>
+  <button class="tiny" id="logout" hidden>sign out</button>
+</header>
+
+<nav id="tabs">
+  <button data-tab="auth" aria-selected="true">Account</button>
+  <button data-tab="docs" aria-selected="false">Documents</button>
+  <button data-tab="retrieval" aria-selected="false">Retrieval lab</button>
+  <button data-tab="chat" aria-selected="false">Chat</button>
+  <button data-tab="study" aria-selected="false">Tests &amp; cards</button>
+  <button data-tab="traces" aria-selected="false">Traces</button>
+</nav>
+
+<main>
+
+<!-- ── account ─────────────────────────────────────────── -->
+<section id="tab-auth">
+  <h2>Account</h2>
+  <p class="hint">
+    The console talks to this same server, so there is no CORS to configure and
+    the WebSocket is same-origin. The access token is kept in
+    <code>localStorage</code> under <code>ragconsole.session</code>.
+  </p>
+  <div class="card">
+    <div class="row">
+      <div class="field"><label for="email">Email</label><input id="email" type="email" autocomplete="username" style="width:240px" /></div>
+      <div class="field"><label for="password">Password</label><input id="password" type="password" autocomplete="current-password" style="width:180px" /></div>
+      <button class="act" id="login">Sign in</button>
+      <button class="act ghost" id="register">Register</button>
+    </div>
+    <div class="err" id="auth-err"></div>
+  </div>
+  <div class="card">
+    <h2>Service health</h2>
+    <div class="log mono" id="health-out">not checked yet</div>
+    <div class="row" style="margin-top:8px"><button class="tiny" id="refresh-health">check again</button></div>
+  </div>
+</section>
+
+<!-- ── documents ───────────────────────────────────────── -->
+<section id="tab-docs" hidden>
+  <h2>Documents</h2>
+  <p class="hint">
+    Upload returns immediately and processing runs as a job; the stage and
+    percentage below arrive over the WebSocket, not by polling.
+  </p>
+  <div class="card">
+    <div class="row">
+      <div class="field"><label for="file">PDF, PPT or PPTX</label><input id="file" type="file" accept=".pdf,.ppt,.pptx" /></div>
+      <button class="act" id="upload">Upload</button>
+      <button class="tiny" id="reload-docs">reload list</button>
+    </div>
+    <div class="err" id="doc-err"></div>
+  </div>
+  <div class="card scroll-x">
+    <table>
+      <thead><tr>
+        <th>File</th><th>Status</th><th>Progress</th><th>Pages</th><th>Chunks</th><th>Id</th><th></th>
+      </tr></thead>
+      <tbody id="doc-rows"><tr><td colspan="7" class="empty">Nothing uploaded yet.</td></tr></tbody>
+    </table>
+  </div>
+  <div class="card" id="chunk-panel" hidden>
+    <h2 id="chunk-title">Chunks</h2>
+    <p class="hint">Chunk boundaries decide what retrieval can possibly return.</p>
+    <div id="chunk-list"></div>
+  </div>
+</section>
+
+<!-- ── retrieval ───────────────────────────────────────── -->
+<section id="tab-retrieval" hidden>
+  <h2>Retrieval lab</h2>
+  <p class="hint">
+    One query, several strategies, side by side. A chunk keeps the same colour
+    across columns, so a passage that only one retriever found is visible at a
+    glance — that, and the overlap figure, is what says whether fusion has
+    anything to fuse.
+  </p>
+  <div class="card">
+    <div class="row">
+      <div class="field" style="flex:1 1 380px">
+        <label for="rq">Question</label>
+        <input id="rq" placeholder="what is smoothing and why is it needed" />
+      </div>
+      <div class="field"><label for="rdoc">Scope</label>
+        <select id="rdoc"><option value="">everything I own</option></select>
+      </div>
+      <div class="field"><label for="rk">Top K</label><input id="rk" type="number" value="10" min="1" max="50" style="width:70px" /></div>
+      <button class="act" id="run-retrieval">Run</button>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <label><input type="checkbox" class="strat" value="bm25" checked /> bm25</label>
+      <label><input type="checkbox" class="strat" value="dense" checked /> dense</label>
+      <label><input type="checkbox" class="strat" value="hybrid" checked /> hybrid</label>
+      <label><input type="checkbox" class="strat" value="hybrid_rerank" checked /> hybrid_rerank</label>
+    </div>
+    <div class="err" id="ret-err"></div>
+  </div>
+  <div id="overlap"></div>
+  <div class="columns" id="ret-cols"></div>
+</section>
+
+<!-- ── chat ────────────────────────────────────────────── -->
+<section id="tab-chat" hidden>
+  <h2>Chat</h2>
+  <p class="hint">
+    Streams over the WebSocket exactly as the real frontend will. A refusal is a
+    normal outcome, not an error: it means nothing in the material supported an
+    answer.
+  </p>
+  <div class="card">
+    <div class="row">
+      <div class="field"><label for="cdoc">Grounded in</label>
+        <select id="cdoc"><option value="">everything I own</option></select>
+      </div>
+      <div class="field"><label for="cmode">Mode</label>
+        <select id="cmode">
+          <option value="detailed" selected>detailed</option>
+          <option value="simple">simple</option>
+          <option value="exam">exam</option>
+        </select>
+      </div>
+      <button class="act ghost" id="new-session">New session</button>
+      <span class="health mono" id="session-label">no session</span>
+    </div>
+  </div>
+  <div id="messages"></div>
+  <div class="card">
+    <div class="row">
+      <div class="field" style="flex:1 1 420px">
+        <label for="cq">Message</label>
+        <textarea id="cq" rows="2" placeholder="Ask something from your material…"></textarea>
+      </div>
+      <button class="act" id="send">Send</button>
+      <button class="tiny" id="cancel">cancel</button>
+    </div>
+    <div class="err" id="chat-err"></div>
+  </div>
+</section>
+
+<!-- ── study ───────────────────────────────────────────── -->
+<section id="tab-study" hidden>
+  <h2>Tests &amp; flashcards</h2>
+  <p class="hint">
+    Generation is a background job; progress arrives over the socket. Multiple
+    choice is graded without a model, short answers get partial credit.
+  </p>
+  <div class="card">
+    <div class="row">
+      <div class="field"><label for="sdoc">Document</label><select id="sdoc"></select></div>
+      <div class="field"><label for="qcount">Questions</label><input id="qcount" type="number" value="4" min="1" max="20" style="width:70px" /></div>
+      <div class="field"><label for="sdiff">Difficulty</label>
+        <select id="sdiff"><option>mixed</option><option>easy</option><option>hard</option></select>
+      </div>
+      <button class="act" id="gen-test">Generate test</button>
+      <div class="field"><label for="ccount">Cards</label><input id="ccount" type="number" value="6" min="1" max="40" style="width:70px" /></div>
+      <button class="act ghost" id="gen-cards">Generate flashcards</button>
+    </div>
+    <div class="log mono" id="gen-log" style="margin-top:10px">idle</div>
+    <div class="err" id="study-err"></div>
+  </div>
+  <div id="paper"></div>
+  <div id="cards"></div>
+</section>
+
+<!-- ── traces ──────────────────────────────────────────── -->
+<section id="tab-traces" hidden>
+  <h2>Traces</h2>
+  <p class="hint">
+    Every stage records what it did. Percentiles rather than means: one call
+    that waited out a rate limit drags an average somewhere no request was.
+  </p>
+  <div class="card">
+    <div class="row">
+      <div class="field"><label for="thours">Window (hours)</label><input id="thours" type="number" value="24" min="1" max="720" style="width:90px" /></div>
+      <button class="act ghost" id="load-summary">Load summary</button>
+      <div class="field" style="flex:1 1 320px">
+        <label for="tcorr">Correlation id (an assistant message id)</label>
+        <input id="tcorr" class="mono" placeholder="paste a message id from the Chat tab" />
+      </div>
+      <button class="act" id="load-trace">Open trace</button>
+    </div>
+    <div class="err" id="trace-err"></div>
+  </div>
+  <div class="card scroll-x" id="summary-card" hidden>
+    <table>
+      <thead><tr><th>Kind</th><th>Stage</th><th>Calls</th><th>Errors</th><th>p50 ms</th><th>p95 ms</th></tr></thead>
+      <tbody id="summary-rows"></tbody>
+    </table>
+  </div>
+  <div class="card" id="trace-card" hidden>
+    <h2 id="trace-title">Trace</h2>
+    <div id="spans"></div>
+  </div>
+</section>
+
+</main>
+
+<script>
+"use strict";
+
+// ── state ──────────────────────────────────────────────────
+const KEY = "ragconsole.session";
+const S = {
+  token: null,
+  refreshToken: null,
+  user: null,
+  ws: null,
+  wsReady: false,
+  docs: [],
+  sessionId: null,
+  streaming: null,   // { messageId, el, bodyEl }
+  history: [],       // [{role, content}] for display only
+};
+
+try {
+  const saved = JSON.parse(localStorage.getItem(KEY) || "null");
+  if (saved && saved.token) Object.assign(S, saved);
+} catch { /* a corrupt entry must not stop the page loading */ }
+
+function persist() {
+  try {
+    localStorage.setItem(KEY, JSON.stringify({
+      token: S.token, refreshToken: S.refreshToken, user: S.user,
+    }));
+  } catch { /* private mode; the console still works for this tab */ }
+}
+
+// ── tiny helpers ───────────────────────────────────────────
+const $ = (id) => document.getElementById(id);
+const el = (tag, cls, text) => {
+  const node = document.createElement(tag);
+  if (cls) node.className = cls;
+  if (text !== undefined) node.textContent = text;
+  return node;
+};
+const clear = (node) => { while (node.firstChild) node.removeChild(node.firstChild); };
+const short = (id) => (id || "").slice(0, 8);
+const showError = (id, err) => { $(id).textContent = err ? String(err.message || err) : ""; };
+
+/**
+ * The little of Markdown the models actually emit: headings, bold, italics,
+ * inline code and bullets.
+ *
+ * Escaping happens first and unconditionally, so nothing in a model's output
+ * can become markup. The console renders material the model wrote *about*
+ * documents a user uploaded -- neither is a source I would hand to innerHTML
+ * unescaped.
+ */
+function renderMarkdown(text) {
+  const escaped = text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+
+  const lines = escaped.split("\n");
+  const out = [];
+  let inList = false;
+
+  const inline = (s) => s
+    .replace(/`([^`]+)`/g, "<code>$1</code>")
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/(^|[^*])\*([^*\n]+)\*/g, "$1<em>$2</em>")
+    // Citations are the point of a grounded answer, so they get to stand out.
+    .replace(/\[(S\d+)\]/g, '<span class="cite">[$1]</span>');
+
+  for (const line of lines) {
+    const bullet = line.match(/^\s*[-*]\s+(.*)$/);
+    if (bullet) {
+      if (!inList) { out.push("<ul>"); inList = true; }
+      out.push(`<li>${inline(bullet[1])}</li>`);
+      continue;
+    }
+    if (inList) { out.push("</ul>"); inList = false; }
+
+    const heading = line.match(/^(#{1,6})\s+(.*)$/);
+    if (heading) {
+      out.push(`<h4>${inline(heading[2])}</h4>`);
+    } else if (line.trim() === "") {
+      out.push("<br>");
+    } else {
+      out.push(`<div>${inline(line)}</div>`);
+    }
+  }
+  if (inList) out.push("</ul>");
+  return out.join("");
+}
+
+/** A stable colour per chunk id, so the same passage reads the same in every
+ *  column of the retrieval comparison. */
+function hue(id) {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) % 360;
+  return `hsl(${h} 62% 52%)`;
+}
+
+async function api(path, options = {}) {
+  const headers = { ...(options.headers || {}) };
+  if (S.token) headers.authorization = `Bearer ${S.token}`;
+  if (options.body && !(options.body instanceof FormData)) {
+    headers["content-type"] = "application/json";
+  }
+  const res = await fetch(path, { ...options, headers });
+  if (res.status === 204) return null;
+
+  const text = await res.text();
+  let payload = null;
+  try { payload = text ? JSON.parse(text) : null; } catch { /* not json */ }
+
+  if (!res.ok) {
+    const message = payload?.error?.message || payload?.message || text.slice(0, 300) || res.statusText;
+    const error = new Error(`${res.status} ${message}`);
+    error.status = res.status;
+    throw error;
+  }
+  return payload;
+}
+
+// ── tabs ───────────────────────────────────────────────────
+const TABS = ["auth", "docs", "retrieval", "chat", "study", "traces"];
+$("tabs").addEventListener("click", (event) => {
+  const name = event.target.dataset?.tab;
+  if (!name) return;
+  for (const tab of TABS) {
+    $(`tab-${tab}`).hidden = tab !== name;
+  }
+  for (const button of $("tabs").querySelectorAll("button")) {
+    button.setAttribute("aria-selected", String(button.dataset.tab === name));
+  }
+});
+
+// ── health ─────────────────────────────────────────────────
+async function checkHealth() {
+  const out = $("health-out");
+  try {
+    const health = await fetch("/health/ready").then((r) => r.json());
+    $("api-dot").className = "dot up";
+    const rag = health?.checks?.rag ?? health?.rag;
+    const ragUp = rag === true || rag?.ok === true || rag?.status === "ok";
+    $("rag-dot").className = `dot ${ragUp ? "up" : "down"}`;
+    out.textContent = JSON.stringify(health, null, 2);
+  } catch (err) {
+    $("api-dot").className = "dot down";
+    $("rag-dot").className = "dot down";
+    out.textContent = `readiness check failed: ${err.message}`;
+  }
+}
+$("refresh-health").addEventListener("click", checkHealth);
+
+// ── auth ───────────────────────────────────────────────────
+async function authenticate(path) {
+  showError("auth-err", null);
+  try {
+    const body = JSON.stringify({ email: $("email").value.trim(), password: $("password").value });
+    const result = await api(`/api/auth/${path}`, { method: "POST", body });
+    S.token = result.accessToken;
+    S.refreshToken = result.refreshToken;
+    S.user = result.user;
+    persist();
+    onSignedIn();
+  } catch (err) {
+    showError("auth-err", err);
+  }
+}
+$("login").addEventListener("click", () => authenticate("login"));
+$("register").addEventListener("click", () => authenticate("register"));
+$("logout").addEventListener("click", () => {
+  S.token = S.refreshToken = S.user = null;
+  S.ws?.close();
+  persist();
+  $("who").textContent = "signed out";
+  $("logout").hidden = true;
+});
+
+function onSignedIn() {
+  $("who").textContent = S.user?.email || "signed in";
+  $("logout").hidden = false;
+  connectSocket();
+  void loadDocuments();
+}
+
+// ── websocket ──────────────────────────────────────────────
+function connectSocket() {
+  if (!S.token) return;
+  if (S.ws && S.ws.readyState <= 1) return;
+
+  const url = `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`;
+  const ws = new WebSocket(url);
+  S.ws = ws;
+
+  ws.addEventListener("open", () => {
+    // The token goes in the first frame, never in the URL: a URL lands in
+    // access logs and referrer headers.
+    ws.send(JSON.stringify({ type: "auth", token: S.token }));
+  });
+  ws.addEventListener("close", () => {
+    S.wsReady = false;
+    $("ws-dot").className = "dot down";
+  });
+  ws.addEventListener("error", () => { $("ws-dot").className = "dot down"; });
+  ws.addEventListener("message", (event) => {
+    let frame;
+    try { frame = JSON.parse(event.data); } catch { return; }
+    handleFrame(frame);
+  });
+}
+
+function wsSend(frame) {
+  if (!S.ws || S.ws.readyState !== 1) throw new Error("socket is not connected");
+  S.ws.send(JSON.stringify(frame));
+}
+
+function handleFrame(frame) {
+  switch (frame.type) {
+    case "ready":
+      S.wsReady = true;
+      $("ws-dot").className = "dot up";
+      break;
+
+    case "document:progress": {
+      const cell = $(`prog-${frame.documentId}`);
+      if (cell) {
+        const p = frame.progress || {};
+        cell.textContent = `${p.stage ?? "…"} ${p.percent ?? 0}%`;
+      }
+      if (frame.progress?.stage === "completed") void loadDocuments();
+      break;
+    }
+
+    case "generation:progress": {
+      const p = frame;
+      $("gen-log").textContent =
+        `${p.kind}: ${p.status} — ${p.produced}/${p.total}${p.message ? ` — ${p.message}` : ""}`;
+      if (p.status === "ready") {
+        if (p.kind === "test") void openTest(p.targetId);
+        else void openCards(p.targetId);
+      }
+      break;
+    }
+
+    case "chat:start":
+      beginAssistantMessage(frame.messageId);
+      break;
+
+    case "chat:token":
+      appendToken(frame.delta);
+      break;
+
+    case "chat:sources":
+      renderSources(frame.sources);
+      break;
+
+    case "chat:done":
+      finishAssistantMessage(frame);
+      break;
+
+    case "error":
+      showError("chat-err", new Error(`${frame.code}: ${frame.message}`));
+      finishAssistantMessage({ unsupported: false, retrieved: 0 });
+      break;
+  }
+}
+
+// ── documents ──────────────────────────────────────────────
+async function loadDocuments() {
+  if (!S.token) return;
+  try {
+    const { documents } = await api("/api/documents?limit=50");
+    S.docs = documents;
+    renderDocuments();
+    fillDocumentPickers();
+  } catch (err) {
+    showError("doc-err", err);
+  }
+}
+
+function renderDocuments() {
+  const body = $("doc-rows");
+  clear(body);
+
+  if (S.docs.length === 0) {
+    const row = el("tr");
+    const cell = el("td", "empty", "Nothing uploaded yet.");
+    cell.colSpan = 7;
+    row.append(cell);
+    body.append(row);
+    return;
+  }
+
+  for (const doc of S.docs) {
+    const row = el("tr");
+    row.append(el("td", null, doc.filename));
+
+    const status = el("td");
+    const cls = doc.status === "ready" ? "good" : doc.status === "failed" ? "bad" : "warn";
+    status.append(el("span", `tag ${cls}`, doc.status));
+    if (doc.errorMessage) {
+      status.append(el("div", "err", doc.errorMessage));
+    }
+    row.append(status);
+
+    const progress = el("td", "mono", doc.status === "ready" ? "—" : "waiting");
+    progress.id = `prog-${doc.id}`;
+    row.append(progress);
+
+    row.append(el("td", "mono", String(doc.pageCount ?? "—")));
+    row.append(el("td", "mono", String(doc.chunkCount ?? "—")));
+    row.append(el("td", "mono", short(doc.id)));
+
+    const actions = el("td");
+    const chunks = el("button", "tiny", "chunks");
+    chunks.addEventListener("click", () => void showChunks(doc));
+    const remove = el("button", "tiny", "delete");
+    remove.addEventListener("click", () => void deleteDocument(doc));
+    actions.append(chunks, " ", remove);
+    row.append(actions);
+
+    body.append(row);
+
+    // Subscribing only matters while it is still processing.
+    if (S.wsReady && doc.status !== "ready" && doc.status !== "failed") {
+      try { wsSend({ type: "subscribe:document", documentId: doc.id }); } catch { /* not connected */ }
+    }
+  }
+}
+
+function fillDocumentPickers() {
+  for (const [id, includeAll] of [["rdoc", true], ["cdoc", true], ["sdoc", false]]) {
+    const select = $(id);
+    const previous = select.value;
+    clear(select);
+    if (includeAll) select.append(new Option("everything I own", ""));
+    for (const doc of S.docs) {
+      if (doc.status !== "ready") continue;
+      select.append(new Option(doc.filename, doc.id));
+    }
+    if (previous) select.value = previous;
+  }
+}
+
+$("reload-docs").addEventListener("click", () => void loadDocuments());
+
+$("upload").addEventListener("click", async () => {
+  showError("doc-err", null);
+  const file = $("file").files?.[0];
+  if (!file) { showError("doc-err", new Error("Choose a file first")); return; }
+
+  const form = new FormData();
+  form.append("file", file);
+  try {
+    const { documentId } = await api("/api/documents", { method: "POST", body: form });
+    if (S.wsReady) wsSend({ type: "subscribe:document", documentId });
+    await loadDocuments();
+  } catch (err) {
+    showError("doc-err", err);
+  }
+});
+
+async function deleteDocument(doc) {
+  if (!confirm(`Delete "${doc.filename}"? Its vectors go too.`)) return;
+  try {
+    await api(`/api/documents/${doc.id}`, { method: "DELETE" });
+    await loadDocuments();
+  } catch (err) {
+    showError("doc-err", err);
+  }
+}
+
+async function showChunks(doc) {
+  try {
+    const { chunks } = await api(`/api/documents/${doc.id}/chunks`);
+    $("chunk-panel").hidden = false;
+    $("chunk-title").textContent = `${chunks.length} chunks — ${doc.filename}`;
+    const list = $("chunk-list");
+    clear(list);
+    for (const chunk of chunks) {
+      const block = el("div", "hit");
+      const top = el("div", "top");
+      top.append(el("span", "rank", `#${chunk.chunkIndex}`));
+      top.append(el("span", "head", (chunk.headingPath || []).join(" › ") || chunk.heading || "—"));
+      block.append(top);
+      const where = [
+        chunk.pageNumber ? `p.${chunk.pageNumber}` : null,
+        chunk.slideNumber ? `slide ${chunk.slideNumber}` : null,
+        `${chunk.tokenCount} tok`,
+        chunk.source === "vision" ? "read from an image" : null,
+      ].filter(Boolean).join(" · ");
+      block.append(el("div", "meta", where));
+      block.append(el("div", "snip", chunk.text));
+      list.append(block);
+    }
+  } catch (err) {
+    showError("doc-err", err);
+  }
+}
+
+// ── retrieval lab ──────────────────────────────────────────
+$("run-retrieval").addEventListener("click", async () => {
+  showError("ret-err", null);
+  const query = $("rq").value.trim();
+  if (!query) { showError("ret-err", new Error("Type a question first")); return; }
+
+  const strategies = [...document.querySelectorAll(".strat:checked")].map((c) => c.value);
+  if (strategies.length === 0) { showError("ret-err", new Error("Pick at least one strategy")); return; }
+
+  const documentId = $("rdoc").value;
+  const button = $("run-retrieval");
+  button.disabled = true;
+  button.textContent = "Running…";
+
+  try {
+    const result = await api("/api/retrieval/search", {
+      method: "POST",
+      body: JSON.stringify({
+        query,
+        topK: Number($("rk").value) || 10,
+        strategies,
+        ...(documentId ? { documentIds: [documentId] } : {}),
+      }),
+    });
+    renderRetrieval(result);
+  } catch (err) {
+    showError("ret-err", err);
+  } finally {
+    button.disabled = false;
+    button.textContent = "Run";
+  }
+});
+
+function renderRetrieval(result) {
+  const columns = $("ret-cols");
+  clear(columns);
+
+  const sets = result.strategies
+    .filter((s) => s.ok)
+    .map((s) => new Set(s.results.map((r) => r.chunk_id)));
+
+  // How much the strategies agree. When two retrievers return the same set,
+  // fusion has nothing to add and can only reorder.
+  const overlap = $("overlap");
+  clear(overlap);
+  if (sets.length >= 2) {
+    const union = new Set(sets.flatMap((s) => [...s]));
+    let shared = 0;
+    for (const id of union) if (sets.every((s) => s.has(id))) shared++;
+    const card = el("div", "card");
+    card.append(el("span", "tag", `${union.size} distinct chunks across ${sets.length} strategies`));
+    card.append(document.createTextNode(" "));
+    card.append(el("span", `tag ${shared === union.size ? "warn" : "good"}`,
+      `${shared} returned by all of them`));
+    if (shared === union.size) {
+      card.append(el("p", "hint",
+        "Every strategy returned the same set. Fusion cannot add recall here — " +
+        "it can only reorder, which is why hybrid tends to lose to the better " +
+        "single retriever on a small corpus."));
+    }
+    overlap.append(card);
+  }
+
+  for (const outcome of result.strategies) {
+    const column = el("div", "col");
+    const head = el("h3");
+    head.append(el("span", "mono", outcome.strategy));
+    head.append(el("span", "tag", outcome.ok ? `${outcome.count} hits · ${outcome.tookMs}ms` : "failed"));
+    column.append(head);
+
+    if (!outcome.ok) {
+      column.append(el("div", "hit err", outcome.error || "unknown failure"));
+      columns.append(column);
+      continue;
+    }
+    if (outcome.results.length === 0) {
+      column.append(el("div", "hit empty", "Nothing retrieved."));
+      columns.append(column);
+      continue;
+    }
+
+    outcome.results.forEach((hit, index) => {
+      const block = el("div", "hit");
+      const top = el("div", "top");
+
+      const swatch = el("span", "swatch");
+      swatch.style.background = hue(hit.chunk_id);
+      top.append(el("span", "rank", `${index + 1}.`), swatch);
+      top.append(el("span", "head", (hit.heading_path || []).join(" › ") || hit.heading || hit.document_name));
+      block.append(top);
+
+      const parts = [`score ${hit.score.toFixed(4)}`];
+      if (hit.dense_rank !== null && hit.dense_rank !== undefined) parts.push(`d#${hit.dense_rank + 1}`);
+      if (hit.sparse_rank !== null && hit.sparse_rank !== undefined) parts.push(`s#${hit.sparse_rank + 1}`);
+      if (hit.rerank_score !== null && hit.rerank_score !== undefined) parts.push(`rr ${hit.rerank_score.toFixed(3)}`);
+      if (hit.source === "vision") parts.push("image");
+      parts.push(short(hit.chunk_id));
+      block.append(el("div", "meta", parts.join(" · ")));
+      block.append(el("div", "snip", hit.text));
+      column.append(block);
+    });
+
+    columns.append(column);
+  }
+}
+
+// ── chat ───────────────────────────────────────────────────
+$("new-session").addEventListener("click", async () => {
+  showError("chat-err", null);
+  try {
+    const documentId = $("cdoc").value;
+    const { session } = await api("/api/chat/sessions", {
+      method: "POST",
+      body: JSON.stringify(documentId ? { documentId } : {}),
+    });
+    S.sessionId = session.id;
+    S.history = [];
+    clear($("messages"));
+    $("session-label").textContent = `session ${short(session.id)}`;
+  } catch (err) {
+    showError("chat-err", err);
+  }
+});
+
+$("send").addEventListener("click", () => void sendMessage());
+$("cq").addEventListener("keydown", (event) => {
+  if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) void sendMessage();
+});
+
+async function sendMessage() {
+  showError("chat-err", null);
+  const content = $("cq").value.trim();
+  if (!content) return;
+
+  if (!S.sessionId) {
+    $("new-session").click();
+    // The click is async; ask again once it lands rather than racing it.
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    if (!S.sessionId) { showError("chat-err", new Error("Could not start a session")); return; }
+  }
+
+  const bubble = el("div", "msg user");
+  bubble.append(el("div", "who", "you"));
+  bubble.append(el("div", "body", content));
+  $("messages").append(bubble);
+  S.history.push({ role: "user", content });
+  $("cq").value = "";
+
+  try {
+    wsSend({
+      type: "chat:send",
+      sessionId: S.sessionId,
+      content,
+      mode: $("cmode").value,
+    });
+  } catch (err) {
+    showError("chat-err", err);
+  }
+}
+
+$("cancel").addEventListener("click", () => {
+  if (!S.sessionId) return;
+  try { wsSend({ type: "cancel", sessionId: S.sessionId }); } catch { /* already gone */ }
+});
+
+function beginAssistantMessage(messageId) {
+  const bubble = el("div", "msg");
+  const who = el("div", "who");
+  who.append(document.createTextNode("assistant · "));
+  const idLink = el("button", "tiny", short(messageId));
+  idLink.title = "open this answer's trace";
+  idLink.addEventListener("click", () => {
+    $("tcorr").value = messageId;
+    $("tabs").querySelector('[data-tab="traces"]').click();
+    void loadTrace();
+  });
+  who.append(idLink);
+  bubble.append(who);
+
+  const body = el("div", "body");
+  body.append(el("span", "caret"));
+  bubble.append(body);
+  $("messages").append(bubble);
+
+  S.streaming = { messageId, el: bubble, bodyEl: body, text: "" };
+  bubble.scrollIntoView({ block: "end" });
+}
+
+function appendToken(delta) {
+  if (!S.streaming) return;
+  S.streaming.text += delta;
+  const body = S.streaming.bodyEl;
+  clear(body);
+  body.append(document.createTextNode(S.streaming.text));
+  body.append(el("span", "caret"));
+}
+
+function renderSources(sources) {
+  if (!S.streaming || sources.length === 0) return;
+  const block = el("div", "sources");
+  for (const source of sources) {
+    const line = el("div", "src");
+    const marker = el("b", null, source.marker);
+    line.append(marker, document.createTextNode(" "));
+    const where = [
+      source.documentName,
+      source.slideNumber ? `slide ${source.slideNumber}` : null,
+      source.pageNumber ? `p.${source.pageNumber}` : null,
+      (source.headingPath || []).join(" › ") || null,
+    ].filter(Boolean).join(" · ");
+    line.append(document.createTextNode(where));
+    block.append(line);
+  }
+  S.streaming.el.append(block);
+}
+
+function finishAssistantMessage(frame) {
+  if (!S.streaming) return;
+  const body = S.streaming.bodyEl;
+  clear(body);
+  // Rendered only once the answer is complete. While tokens are arriving the
+  // raw text is left alone: re-parsing half a heading on every delta looks
+  // like a glitch, and seeing the tokens land is half the point of streaming.
+  body.classList.add("md");
+  body.innerHTML = renderMarkdown(S.streaming.text);
+
+  const footer = el("div", "sources");
+  footer.append(el("span", "tag", `${frame.retrieved ?? 0} chunks retrieved`));
+  if (frame.unsupported) {
+    footer.append(document.createTextNode(" "));
+    footer.append(el("span", "tag warn", "not supported by the material"));
+  }
+  S.streaming.el.append(footer);
+
+  S.history.push({ role: "assistant", content: S.streaming.text });
+  S.streaming = null;
+}
+
+// ── tests and flashcards ───────────────────────────────────
+$("gen-test").addEventListener("click", async () => {
+  showError("study-err", null);
+  const documentId = $("sdoc").value;
+  if (!documentId) { showError("study-err", new Error("Pick a ready document")); return; }
+  try {
+    const { testId } = await api("/api/tests", {
+      method: "POST",
+      body: JSON.stringify({
+        documentId,
+        questionCount: Number($("qcount").value) || 4,
+        difficulty: $("sdiff").value,
+      }),
+    });
+    $("gen-log").textContent = `test ${short(testId)} queued`;
+    if (S.wsReady) wsSend({ type: "subscribe:generation", targetId: testId });
+  } catch (err) {
+    showError("study-err", err);
+  }
+});
+
+$("gen-cards").addEventListener("click", async () => {
+  showError("study-err", null);
+  const documentId = $("sdoc").value;
+  if (!documentId) { showError("study-err", new Error("Pick a ready document")); return; }
+  try {
+    const { setId } = await api("/api/flashcards", {
+      method: "POST",
+      body: JSON.stringify({ documentId, cardCount: Number($("ccount").value) || 6 }),
+    });
+    $("gen-log").textContent = `flashcard set ${short(setId)} queued`;
+    if (S.wsReady) wsSend({ type: "subscribe:generation", targetId: setId });
+  } catch (err) {
+    showError("study-err", err);
+  }
+});
+
+async function openTest(testId) {
+  try {
+    const { test, questions } = await api(`/api/tests/${testId}`);
+    const { attempt } = await api(`/api/tests/${testId}/attempts`, { method: "POST" });
+
+    const paper = $("paper");
+    clear(paper);
+    const header = el("div", "card");
+    header.append(el("h2", null, test.title || "Test"));
+    header.append(el("p", "hint", "Answers are withheld until you submit."));
+    paper.append(header);
+
+    for (const question of questions) {
+      const block = el("div", "qa");
+      block.dataset.questionId = question.id;
+      block.append(el("div", "prompt", `${question.position + 1}. ${question.prompt}`));
+
+      if (question.type === "mcq" && question.options) {
+        question.options.forEach((option, index) => {
+          const label = el("label");
+          const input = el("input");
+          input.type = "radio";
+          input.name = `q-${question.id}`;
+          input.value = String(index);
+          label.append(input, document.createTextNode(` ${option}`));
+          block.append(label);
+        });
+      } else if (question.type === "true_false") {
+        for (const option of ["True", "False"]) {
+          const label = el("label");
+          const input = el("input");
+          input.type = "radio";
+          input.name = `q-${question.id}`;
+          input.value = option;
+          label.append(input, document.createTextNode(` ${option}`));
+          block.append(label);
+        }
+      } else {
+        const area = el("textarea");
+        area.rows = 3;
+        area.style.width = "100%";
+        area.dataset.free = "1";
+        block.append(area);
+      }
+      paper.append(block);
+    }
+
+    const submit = el("button", "act", "Submit and grade");
+    submit.addEventListener("click", () => void submitAttempt(attempt.id, submit));
+    const footer = el("div", "card");
+    footer.append(submit);
+    paper.append(footer);
+    $("tabs").querySelector('[data-tab="study"]').click();
+  } catch (err) {
+    showError("study-err", err);
+  }
+}
+
+async function submitAttempt(attemptId, button) {
+  button.disabled = true;
+  button.textContent = "Grading…";
+  try {
+    const answers = [...document.querySelectorAll(".qa")].map((block) => {
+      const free = block.querySelector("textarea[data-free]");
+      if (free) return { questionId: block.dataset.questionId, response: free.value || null };
+      const picked = block.querySelector("input[type=radio]:checked");
+      return { questionId: block.dataset.questionId, response: picked ? picked.value : null };
+    });
+
+    const result = await api(`/api/tests/attempts/${attemptId}/submit`, {
+      method: "POST",
+      body: JSON.stringify({ answers }),
+    });
+
+    const paper = $("paper");
+    const scoreCard = el("div", "card");
+    scoreCard.append(el("h2", null, `Scored ${result.score} / ${result.maxScore}`));
+    paper.prepend(scoreCard);
+
+    for (const graded of result.results) {
+      const block = [...document.querySelectorAll(".qa")]
+        .find((node) => node.dataset.questionId === graded.questionId);
+      if (!block) continue;
+      const feedback = el("div", "feedback");
+      const verdict = el("span", `tag ${graded.isCorrect ? "good" : "bad"}`,
+        `${graded.awarded} awarded`);
+      feedback.append(verdict);
+      feedback.append(el("div", null, graded.feedback));
+      if (!graded.isCorrect) {
+        feedback.append(el("div", "mono", `expected: ${graded.correctAnswer}`));
+      }
+      block.append(feedback);
+    }
+  } catch (err) {
+    showError("study-err", err);
+  } finally {
+    button.disabled = false;
+    button.textContent = "Submit and grade";
+  }
+}
+
+async function openCards(setId) {
+  try {
+    const { set, cards } = await api(`/api/flashcards/${setId}`);
+    const container = $("cards");
+    clear(container);
+    container.append(el("h2", null, `${set.title} — ${cards.length} cards`));
+    for (const card of cards) {
+      const face = el("div", "card-face");
+      face.append(el("div", null, card.front));
+      const back = el("div", "back", card.back);
+      back.hidden = true;
+      face.append(back);
+      face.addEventListener("click", () => { back.hidden = !back.hidden; });
+      container.append(face);
+    }
+    $("tabs").querySelector('[data-tab="study"]').click();
+  } catch (err) {
+    showError("study-err", err);
+  }
+}
+
+// ── traces ─────────────────────────────────────────────────
+$("load-summary").addEventListener("click", async () => {
+  showError("trace-err", null);
+  try {
+    const { stages } = await api(`/api/traces?hours=${Number($("thours").value) || 24}`);
+    const body = $("summary-rows");
+    clear(body);
+    $("summary-card").hidden = false;
+
+    if (stages.length === 0) {
+      const row = el("tr");
+      const cell = el("td", "empty", "No traces in that window.");
+      cell.colSpan = 6;
+      row.append(cell);
+      body.append(row);
+      return;
+    }
+
+    for (const stage of stages) {
+      const row = el("tr");
+      row.append(el("td", "mono", stage.kind));
+      row.append(el("td", null, stage.name));
+      row.append(el("td", "mono", String(stage.calls)));
+      const errors = el("td", "mono", String(stage.errors));
+      if (stage.errors > 0) errors.style.color = "var(--bad)";
+      row.append(errors);
+      row.append(el("td", "mono", String(stage.p50 ?? "—")));
+      row.append(el("td", "mono", String(stage.p95 ?? "—")));
+      body.append(row);
+    }
+  } catch (err) {
+    showError("trace-err", err);
+  }
+});
+
+$("load-trace").addEventListener("click", () => void loadTrace());
+
+async function loadTrace() {
+  showError("trace-err", null);
+  const correlationId = $("tcorr").value.trim();
+  if (!correlationId) { showError("trace-err", new Error("Paste a correlation id")); return; }
+
+  try {
+    const trace = await api(`/api/traces/${correlationId}`);
+    $("trace-card").hidden = false;
+    $("trace-title").textContent = `${trace.kind} — ${trace.spans.length} spans, ${trace.totalMs}ms`;
+
+    const container = $("spans");
+    clear(container);
+    // Bars are scaled against the slowest span, so the one stage that
+    // dominates a request is obvious rather than arithmetic.
+    const worst = Math.max(1, ...trace.spans.map((s) => s.durationMs ?? 0));
+
+    for (const span of trace.spans) {
+      const row = el("div", "span");
+      row.append(el("div", "mono", span.name));
+
+      const track = el("div");
+      const bar = el("div", `bar${span.error ? " failed" : ""}`);
+      bar.style.width = `${Math.max(2, ((span.durationMs ?? 0) / worst) * 100)}%`;
+      track.append(bar);
+      row.append(track);
+      row.append(el("div", "num", `${span.durationMs ?? 0}ms`));
+      container.append(row);
+
+      const payload = {
+        ...(span.input ? { input: span.input } : {}),
+        ...(span.output ? { output: span.output } : {}),
+        ...(span.metadata ? { metadata: span.metadata } : {}),
+        ...(span.error ? { error: span.error } : {}),
+      };
+      if (Object.keys(payload).length > 0) {
+        const details = el("details", "raw");
+        details.append(el("summary", null, span.error ? "failed — details" : "details"));
+        details.append(el("pre", null, JSON.stringify(payload, null, 2)));
+        container.append(details);
+      }
+    }
+  } catch (err) {
+    showError("trace-err", err);
+  }
+}
+
+// ── boot ───────────────────────────────────────────────────
+void checkHealth();
+if (S.token) {
+  onSignedIn();
+} else {
+  $("who").textContent = "signed out";
+}
+</script>
+</body>
+</html>
