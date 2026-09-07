@@ -15,7 +15,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the decision record.
 
 ## Status
 
-**Milestone 3 — Reranking and evaluation. Complete.**
+**Milestone 4 — Grounded chat. Complete.**
 
 | Milestone | Scope | State |
 | --- | --- | --- |
@@ -23,8 +23,8 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the decision record.
 | 1 | Document ingestion, chunking, metadata preservation | done |
 | 2 | Embeddings, Qdrant index, BM25, hybrid search, RRF | done |
 | 3 | Reranking, context construction, eval harness | done |
-| 4 | LLM provider, grounded chat, WebSocket streaming | next |
-| 5 | Test generation, grading, flashcards | |
+| 4 | LLM provider, grounded chat, WebSocket streaming | done |
+| 5 | Test generation, grading, flashcards | next |
 | 6 | Tracing, gold-set generation, retrieval metrics | |
 
 ---
@@ -180,6 +180,38 @@ curl -s "http://localhost:8000/retrieve/stats" -H "x-internal-token: dev_interna
 
 Answers the first question when retrieval returns nothing: is the corpus empty,
 or is the query bad?
+
+---
+
+## Chatting with a document
+
+The conversation runs over a WebSocket at `/ws`. The first frame must be an
+auth frame — a token in the URL would land in access logs and referrer
+headers:
+
+```json
+{ "type": "auth", "token": "<access token>" }
+{ "type": "chat:send", "sessionId": "…", "content": "what is smoothing", "mode": "simple" }
+```
+
+The server replies with `chat:start`, a stream of `chat:token` deltas,
+`chat:sources`, then `chat:done`. Sessions and history are REST
+(`/api/chat/sessions`), so a reloaded page can rebuild the conversation.
+
+Three things keep answers honest:
+
+- **The model must cite.** Every claim carries an `[S1]`-style marker, and
+  after generation each marker is resolved against the sources actually
+  supplied. An invented `[S9]` is reported, never rendered.
+- **Refusal is a first-class outcome.** When the material cannot support an
+  answer the model returns a refusal token, and the student is told plainly
+  rather than given a fluent answer from the model's own knowledge.
+- **Explanation mode changes style, never grounding.** `simple`, `detailed`
+  and `exam` share an identical rule block; only the style section differs.
+
+Follow-ups are condensed against the conversation before retrieval — *"how does
+it differ from a trigram"* becomes *"how does a bigram differ from a trigram"*,
+which is what makes a pronoun searchable at all.
 
 ---
 

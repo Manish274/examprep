@@ -1,0 +1,157 @@
+import { Hono } from "hono";
+import { and, asc, desc, eq, inArray } from "drizzle-orm";
+import { z } from "zod";
+import {
+  chatSessions,
+  documents,
+  messageSources,
+  messages,
+} from "@examprep/db";
+import { db } from "../lib/db.js";
+import { validate } from "../lib/validate.js";
+import { notFound } from "../lib/errors.js";
+import { currentUserId, requireAuth } from "../middleware/auth.js";
+import type { AppEnv } from "../types.js";
+
+const createSessionSchema = z.object({
+  /** Omit to search everything the student owns. */
+  documentId: z.string().uuid().optional(),
+  title: z.string().min(1).max(200).optional(),
+});
+
+const idParamSchema = z.object({ id: z.string().uuid() });
+
+/**
+ * REST for chat history. The conversation itself runs over the WebSocket --
+ * these endpoints exist so a reloaded page can rebuild what was said.
+ */
+export const chatRoutes = new Hono<AppEnv>()
+  .use("*", requireAuth())
+
+  .post("/sessions", validate("json", createSessionSchema), async (c) => {
+    const userId = currentUserId(c);
+    const { documentId, title } = c.req.valid("json");
+
+    if (documentId) {
+      // Checked here rather than at first message, so a session is never
+      // created pointing at a document the student cannot reach.
+      const [owned] = await db()
+        .select({ id: documents.id })
+        .from(documents)
+        .where(and(eq(documents.id, documentId), eq(documents.userId, userId)))
+        .limit(1);
+      if (!owned) {
+        throw notFound("Document");
+      }
+    }
+
+    const [created] = await db()
+      .insert(chatSessions)
+      .values({
+        userId,
+        documentId: documentId ?? null,
+        title: title ?? null,
+      })
+      .returning();
+
+    return c.json({ session: created }, 201);
+  })
+
+  .get("/sessions", async (c) => {
+    const rows = await db()
+      .select()
+      .from(chatSessions)
+      .where(eq(chatSessions.userId, currentUserId(c)))
+      .orderBy(desc(chatSessions.updatedAt))
+      .limit(50);
+
+    return c.json({ sessions: rows });
+  })
+
+  .get("/sessions/:id", validate("param", idParamSchema), async (c) => {
+    const [session] = await db()
+      .select()
+      .from(chatSessions)
+      .where(
+        and(
+          eq(chatSessions.id, c.req.valid("param").id),
+          eq(chatSessions.userId, currentUserId(c)),
+        ),
+      )
+      .limit(1);
+
+    if (!session) {
+      throw notFound("Session");
+    }
+    return c.json({ session });
+  })
+
+  .get("/sessions/:id/messages", validate("param", idParamSchema), async (c) => {
+    const userId = currentUserId(c);
+    const sessionId = c.req.valid("param").id;
+
+    const [session] = await db()
+      .select({ id: chatSessions.id })
+      .from(chatSessions)
+      .where(
+        and(eq(chatSessions.id, sessionId), eq(chatSessions.userId, userId)),
+      )
+      .limit(1);
+
+    if (!session) {
+      throw notFound("Session");
+    }
+
+    const rows = await db()
+      .select()
+      .from(messages)
+      .where(eq(messages.sessionId, sessionId))
+      .orderBy(asc(messages.createdAt));
+
+    // Citations are fetched in one query and grouped, rather than one query
+    // per message, which would be a round trip per turn on every page load.
+    const sources = rows.length
+      ? await db()
+          .select()
+          .from(messageSources)
+          .where(
+            inArray(
+              messageSources.messageId,
+              rows.map((m) => m.id),
+            ),
+          )
+          .orderBy(asc(messageSources.rank))
+      : [];
+
+    const byMessage = new Map<string, typeof sources>();
+    for (const source of sources) {
+      const list = byMessage.get(source.messageId) ?? [];
+      list.push(source);
+      byMessage.set(source.messageId, list);
+    }
+
+    return c.json({
+      messages: rows.map((m) => ({ ...m, sources: byMessage.get(m.id) ?? [] })),
+    });
+  })
+
+  .delete("/sessions/:id", validate("param", idParamSchema), async (c) => {
+    const userId = currentUserId(c);
+    const sessionId = c.req.valid("param").id;
+
+    const [session] = await db()
+      .select({ id: chatSessions.id })
+      .from(chatSessions)
+      .where(
+        and(eq(chatSessions.id, sessionId), eq(chatSessions.userId, userId)),
+      )
+      .limit(1);
+
+    if (!session) {
+      throw notFound("Session");
+    }
+
+    // Messages and their sources cascade with the session.
+    await db().delete(chatSessions).where(eq(chatSessions.id, sessionId));
+    return c.body(null, 204);
+  });

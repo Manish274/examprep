@@ -14,6 +14,12 @@ import { sourceSchema } from "../schemas/chunks.js";
 // ── client → server ─────────────────────────────────────────
 export const clientEventSchema = z.discriminatedUnion("type", [
   z.object({
+    // Sent as the first frame. A token in the URL would land in access logs
+    // and referrer headers; an auth frame keeps it in the body.
+    type: z.literal("auth"),
+    token: z.string().min(1),
+  }),
+  z.object({
     type: z.literal("subscribe:document"),
     documentId: uuidSchema,
   }),
@@ -27,12 +33,17 @@ export const clientEventSchema = z.discriminatedUnion("type", [
     content: z.string().min(1).max(4000),
     mode: z.enum(["simple", "detailed", "exam"]).default("detailed"),
   }),
+  z.object({ type: z.literal("cancel"), sessionId: uuidSchema }),
   z.object({ type: z.literal("ping") }),
 ]);
 export type ClientEvent = z.infer<typeof clientEventSchema>;
 
 // ── server → client ─────────────────────────────────────────
 export const serverEventSchema = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("ready"),
+    userId: uuidSchema,
+  }),
   z.object({
     type: z.literal("document:progress"),
     documentId: uuidSchema,
@@ -57,11 +68,18 @@ export const serverEventSchema = z.discriminatedUnion("type", [
     sources: z.array(sourceSchema),
   }),
   z.object({
+    type: z.literal("chat:start"),
+    sessionId: uuidSchema,
+    messageId: uuidSchema,
+  }),
+  z.object({
     type: z.literal("chat:done"),
     sessionId: uuidSchema,
     messageId: uuidSchema,
     /** True when the model could not ground an answer in the material. */
     unsupported: z.boolean().default(false),
+    /** Chunks retrieved before the answer was written. */
+    retrieved: z.number().int().nonnegative().default(0),
   }),
   z.object({
     type: z.literal("error"),

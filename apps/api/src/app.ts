@@ -6,12 +6,21 @@ import { requestContext } from "./middleware/request-context.js";
 import { healthRoutes } from "./routes/health.js";
 import { authRoutes } from "./routes/auth.js";
 import { documentRoutes } from "./routes/documents.js";
+import { chatRoutes } from "./routes/chat.js";
 import { notFound } from "./lib/errors.js";
 import type { AppEnv } from "./types.js";
 
 /**
  * Builds the Hono app. Kept free of side effects and server binding so tests
  * can exercise routes through `app.request()` without opening a port.
+ */
+/**
+ * Builds the REST app.
+ *
+ * The WebSocket route is added by the entrypoint rather than here: the
+ * upgrader has to be constructed from this app instance and then bound to the
+ * Node server, neither of which exists yet. Tests therefore get a REST-only
+ * app, which is what they want anyway.
  */
 export function createApp() {
   const app = new Hono<AppEnv>();
@@ -30,9 +39,10 @@ export function createApp() {
   app.route("/", healthRoutes);
   app.route("/api/auth", authRoutes);
   app.route("/api/documents", documentRoutes);
+  app.route("/api/chat", chatRoutes);
 
   // Feature routers land here as milestones complete:
-  //   /api/chat  /api/tests  /api/flashcards
+  //   /api/tests  /api/flashcards
 
   app.notFound(() => {
     throw notFound("Route");

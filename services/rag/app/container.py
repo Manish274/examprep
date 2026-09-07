@@ -23,7 +23,9 @@ from app.embedding.cache import (
 )
 from app.embedding.gemini import GeminiEmbeddingProvider
 from app.embedding.mock import MockEmbeddingProvider
+from app.generation.chat import ChatService
 from app.generation.context import ContextBuilder
+from app.generation.llm import GeminiLLMProvider, MockLLMProvider
 from app.reranking.rerankers import (
     GeminiListwiseReranker,
     JinaReranker,
@@ -147,6 +149,37 @@ def build_vision(settings: Settings) -> object:
     )
 
 
+def build_llm(settings: Settings, *, utility: bool = False) -> object:
+    """Selects the generation model.
+
+    The utility model is a separate, cheaper one for query rewriting: high
+    frequency, low difficulty, and keeping it apart preserves the answering
+    model's quota for answering. Thinking is disabled on it -- rewriting a
+    question into standalone form needs no deliberation, and the tokens are
+    pure latency.
+    """
+    provider = settings.LLM_PROVIDER.lower()
+
+    if provider == "mock":
+        return MockLLMProvider()
+    if provider == "gemini":
+        if not settings.GEMINI_API_KEY:
+            raise RuntimeError(
+                "LLM_PROVIDER=gemini but GEMINI_API_KEY is empty. "
+                "Set the key or switch the provider to 'mock'."
+            )
+        return GeminiLLMProvider(
+            settings.GEMINI_API_KEY,
+            model_id=settings.LLM_UTILITY_MODEL if utility else settings.LLM_MODEL,
+            max_rpm=settings.LLM_MAX_RPM,
+            thinking_budget=0 if utility else None,
+        )
+
+    raise ValueError(
+        f"Unknown LLM_PROVIDER '{settings.LLM_PROVIDER}'. Available: gemini, mock"
+    )
+
+
 class Container:
     """Holds the wired pipeline and owns the lifetimes of its clients."""
 
@@ -156,6 +189,8 @@ class Container:
         self.sparse_encoder = Bm25Encoder()
         self.reranker = build_reranker(settings)
         self.vision = build_vision(settings)
+        self.llm = build_llm(settings)
+        self.utility_llm = build_llm(settings, utility=True)
         self.context_builder = ContextBuilder(
             max_tokens=settings.CONTEXT_MAX_TOKENS,
             max_chunks=settings.CONTEXT_TOP_N,
@@ -182,6 +217,12 @@ class Container:
             ),
             reranker=self.reranker,
             rerank_candidates=settings.RERANK_TOP_N,
+        )
+        self.chat = ChatService(
+            self.retrieval,
+            self.context_builder,
+            self.llm,
+            utility_llm=self.utility_llm,
         )
 
     async def startup(self) -> None:
@@ -235,5 +276,11 @@ def build_test_container(settings: Settings) -> Container:
             ),
             reranker=container.reranker,
             rerank_candidates=settings.RERANK_TOP_N,
+        )
+        container.chat = ChatService(
+            container.retrieval,
+            container.context_builder,
+            container.llm,
+            utility_llm=container.utility_llm,
         )
     return container
