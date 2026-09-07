@@ -142,3 +142,129 @@ export async function ingest(
     clearTimeout(timer);
   }
 }
+
+// ── study generation ────────────────────────────────────────
+
+export interface GeneratedQuestion {
+  type: "mcq" | "short_answer" | "true_false";
+  prompt: string;
+  options: string[] | null;
+  correct_answer: string;
+  explanation: string;
+  source_chunk_id: string;
+}
+
+export interface GeneratedCard {
+  front: string;
+  back: string;
+  source_chunk_id: string;
+}
+
+async function post<T>(
+  path: string,
+  body: unknown,
+  options: { correlationId?: string; timeoutMs?: number } = {},
+): Promise<T> {
+  const { RAG_SERVICE_URL, INTERNAL_SERVICE_TOKEN } = env();
+  // Generation is several rate-limited model calls, so the ceiling is high.
+  const timeoutMs = options.timeoutMs ?? 900_000;
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => {
+    controller.abort();
+  }, timeoutMs);
+
+  try {
+    const response = await fetch(new URL(path, RAG_SERVICE_URL), {
+      method: "POST",
+      signal: controller.signal,
+      headers: {
+        "content-type": "application/json",
+        "x-internal-token": INTERNAL_SERVICE_TOKEN,
+        ...(options.correlationId
+          ? { "x-correlation-id": options.correlationId }
+          : {}),
+      },
+      body: JSON.stringify(body),
+    });
+
+    if (!response.ok) {
+      const text = await response.text().catch(() => "");
+      const message = describeFailure(response.status, text);
+      if (response.status >= 400 && response.status < 500) {
+        throw new RagPermanentError(message, response.status);
+      }
+      throw new Error(message);
+    }
+
+    return (await response.json()) as T;
+  } catch (err) {
+    if (err instanceof Error && err.name === "AbortError") {
+      throw new Error(`${path} timed out after ${timeoutMs}ms`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export const generateTest = (
+  request: {
+    userId: string;
+    documentIds: string[];
+    questionCount: number;
+    types?: string[] | undefined;
+    difficulty?: string | undefined;
+  },
+  options?: { correlationId?: string },
+): Promise<{ questions: GeneratedQuestion[]; stats: Record<string, number> }> =>
+  post(
+    "/generate/test",
+    {
+      user_id: request.userId,
+      document_ids: request.documentIds,
+      question_count: request.questionCount,
+      ...(request.types ? { types: request.types } : {}),
+      ...(request.difficulty ? { difficulty: request.difficulty } : {}),
+    },
+    options,
+  );
+
+export const generateFlashcards = (
+  request: { userId: string; documentIds: string[]; cardCount: number },
+  options?: { correlationId?: string },
+): Promise<{ cards: GeneratedCard[]; stats: Record<string, number> }> =>
+  post(
+    "/generate/flashcards",
+    {
+      user_id: request.userId,
+      document_ids: request.documentIds,
+      card_count: request.cardCount,
+    },
+    options,
+  );
+
+export interface GradableAnswerInput {
+  question_id: string;
+  question_type: string;
+  prompt: string;
+  correct_answer: string;
+  explanation: string;
+  response: string | null;
+  options: string[] | null;
+  source_text: string;
+}
+
+export interface GradedAnswer {
+  question_id: string;
+  is_correct: boolean;
+  awarded: number;
+  feedback: string;
+}
+
+/** Grading blocks the student, so its ceiling is far lower than generation. */
+export const gradeAnswers = (
+  answers: GradableAnswerInput[],
+  options?: { correlationId?: string },
+): Promise<{ graded: GradedAnswer[]; score: number; max_score: number }> =>
+  post("/grade", { answers }, { ...options, timeoutMs: 180_000 });

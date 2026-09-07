@@ -54,4 +54,5 @@ services/rag/.pytest_cache/
 .devdoc
 .devdoc2
 .devsession
+.devtest
 .devuser

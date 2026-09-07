@@ -52,6 +52,18 @@ class ExplanationMode(str, Enum):
     EXAM = "exam"
 
 
+class QuestionType(str, Enum):
+    """Kinds of question a generated test can contain.
+
+    Mirrors the question_type enum in the database. MCQ and true/false are
+    graded by comparison; short answer needs a model to judge meaning.
+    """
+
+    MCQ = "mcq"
+    SHORT_ANSWER = "short_answer"
+    TRUE_FALSE = "true_false"
+
+
 class RetrievalStrategy(str, Enum):
     """The four strategies the evaluation harness compares."""
 

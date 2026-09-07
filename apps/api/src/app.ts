@@ -7,6 +7,8 @@ import { healthRoutes } from "./routes/health.js";
 import { authRoutes } from "./routes/auth.js";
 import { documentRoutes } from "./routes/documents.js";
 import { chatRoutes } from "./routes/chat.js";
+import { testRoutes } from "./routes/tests.js";
+import { flashcardRoutes } from "./routes/flashcards.js";
 import { notFound } from "./lib/errors.js";
 import type { AppEnv } from "./types.js";
 
@@ -40,9 +42,8 @@ export function createApp() {
   app.route("/api/auth", authRoutes);
   app.route("/api/documents", documentRoutes);
   app.route("/api/chat", chatRoutes);
-
-  // Feature routers land here as milestones complete:
-  //   /api/tests  /api/flashcards
+  app.route("/api/tests", testRoutes);
+  app.route("/api/flashcards", flashcardRoutes);
 
   app.notFound(() => {
     throw notFound("Route");

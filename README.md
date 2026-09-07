@@ -15,7 +15,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the decision record.
 
 ## Status
 
-**Milestone 4 — Grounded chat. Complete.**
+**Milestone 5 — Study tools. Complete.**
 
 | Milestone | Scope | State |
 | --- | --- | --- |
@@ -24,8 +24,8 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the decision record.
 | 2 | Embeddings, Qdrant index, BM25, hybrid search, RRF | done |
 | 3 | Reranking, context construction, eval harness | done |
 | 4 | LLM provider, grounded chat, WebSocket streaming | done |
-| 5 | Test generation, grading, flashcards | next |
-| 6 | Tracing, gold-set generation, retrieval metrics | |
+| 5 | Test generation, grading, flashcards | done |
+| 6 | Tracing, observability, evaluation at scale | next |
 
 ---
 
@@ -180,6 +180,34 @@ curl -s "http://localhost:8000/retrieve/stats" -H "x-internal-token: dev_interna
 
 Answers the first question when retrieval returns nothing: is the corpus empty,
 or is the query bad?
+
+---
+
+## Tests and flashcards
+
+```bash
+curl -X POST http://localhost:3001/api/tests -H "authorization: Bearer <tok>" -H "content-type: application/json" -d '{"documentId":"<id>","questionCount":10,"types":["mcq","short_answer"]}'
+```
+
+Returns `202` with a test id; generation runs as a job, since ten questions is
+several rate-limited model calls. Progress arrives over the WebSocket after a
+`subscribe:generation` frame.
+
+`GET /api/tests/:id` returns the paper **without** the answer key — that would
+put the answers in the browser before the test is taken. Start an attempt,
+submit, and the answers arrive with the results.
+
+Grading splits by question type. Multiple choice and true/false are compared
+directly: no model, no cost, no chance of a wrong verdict. Only short answers
+are judged, in one batched call, and they earn **partial credit** — a student
+who has the idea but omits a condition has not failed the question. If the
+grader is unavailable the answer is not silently marked wrong; the feedback
+says it could not be marked.
+
+Every generated question and card names the chunk it came from. Anything the
+model cannot trace back to a supplied passage is discarded rather than shown —
+a question whose answer is not in the material sends a student to revise the
+wrong thing.
 
 ---
 

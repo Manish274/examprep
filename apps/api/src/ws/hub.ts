@@ -9,6 +9,7 @@ import {
 import {
   clientEventSchema,
   documentChannel,
+  generationChannel,
   type ClientEvent,
   type ServerEvent,
 } from "@examprep/shared";
@@ -31,6 +32,8 @@ interface Connection {
   userId: string | null;
   /** Documents this connection wants progress for. */
   watching: Set<string>;
+  /** Tests and flashcard sets this connection wants progress for. */
+  watchingGeneration: Set<string>;
   /** Cancels the answer currently streaming, if any. */
   abort: AbortController | null;
   authTimer: NodeJS.Timeout | null;
@@ -67,25 +70,53 @@ function ensureSubscriber(): Redis {
   if (subscriber) return subscriber;
 
   subscriber = new Redis(env().REDIS_URL, { maxRetriesPerRequest: null });
-  void subscriber.psubscribe("doc:progress:*");
+  void subscriber.psubscribe("doc:progress:*", "gen:progress:*");
 
   subscriber.on("pmessage", (_pattern, channel, payload) => {
-    let parsed: { documentId?: string; progress?: unknown };
+    let parsed: {
+      documentId?: string;
+      progress?: unknown;
+      targetId?: string;
+      kind?: string;
+      status?: string;
+      produced?: number;
+      total?: number;
+      message?: string;
+    };
     try {
       parsed = JSON.parse(payload) as typeof parsed;
     } catch {
       return;
     }
     const documentId = parsed.documentId;
-    if (!documentId || channel !== documentChannel(documentId)) return;
+    if (documentId && channel === documentChannel(documentId)) {
+      for (const connection of connections.values()) {
+        if (!connection.userId || !connection.watching.has(documentId)) continue;
+        send(connection.socket, {
+          type: "document:progress",
+          documentId,
+          // Shape is validated by the worker before publishing.
+          progress: parsed.progress as never,
+        });
+      }
+      return;
+    }
+
+    const targetId = parsed.targetId;
+    if (!targetId || channel !== generationChannel(targetId)) return;
 
     for (const connection of connections.values()) {
-      if (!connection.userId || !connection.watching.has(documentId)) continue;
+      if (!connection.userId || !connection.watchingGeneration.has(targetId)) {
+        continue;
+      }
       send(connection.socket, {
-        type: "document:progress",
-        documentId,
-        // Shape is validated by the worker before publishing.
-        progress: parsed.progress as never,
+        type: "generation:progress",
+        targetId,
+        kind: parsed.kind as never,
+        status: parsed.status as never,
+        produced: Number(parsed.produced ?? 0),
+        total: Number(parsed.total ?? 0),
+        ...(parsed.message ? { message: String(parsed.message) } : {}),
       });
     }
   });
@@ -344,6 +375,9 @@ async function dispatch(
     case "unsubscribe:document":
       connection.watching.delete(event.documentId);
       break;
+    case "subscribe:generation":
+      connection.watchingGeneration.add(event.targetId);
+      break;
     case "cancel":
       // The student navigated away or stopped the answer; abandoning the
       // upstream request stops paying for tokens nobody will read.
@@ -364,6 +398,7 @@ export function createHandlers() {
         socket: ws,
         userId: null,
         watching: new Set(),
+        watchingGeneration: new Set(),
         abort: null,
         authTimer: null,
       };

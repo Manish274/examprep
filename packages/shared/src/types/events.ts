@@ -34,6 +34,10 @@ export const clientEventSchema = z.discriminatedUnion("type", [
     mode: z.enum(["simple", "detailed", "exam"]).default("detailed"),
   }),
   z.object({ type: z.literal("cancel"), sessionId: uuidSchema }),
+  z.object({
+    type: z.literal("subscribe:generation"),
+    targetId: uuidSchema,
+  }),
   z.object({ type: z.literal("ping") }),
 ]);
 export type ClientEvent = z.infer<typeof clientEventSchema>;
@@ -68,6 +72,15 @@ export const serverEventSchema = z.discriminatedUnion("type", [
     sources: z.array(sourceSchema),
   }),
   z.object({
+    type: z.literal("generation:progress"),
+    targetId: uuidSchema,
+    kind: z.enum(["test", "flashcards"]),
+    status: z.enum(["generating", "ready", "failed"]),
+    produced: z.number().int().nonnegative().default(0),
+    total: z.number().int().nonnegative().default(0),
+    message: z.string().optional(),
+  }),
+  z.object({
     type: z.literal("chat:start"),
     sessionId: uuidSchema,
     messageId: uuidSchema,
@@ -93,3 +106,7 @@ export type ServerEvent = z.infer<typeof serverEventSchema>;
 /** Redis pub/sub channel carrying worker progress back to the API's WS hub. */
 export const documentChannel = (documentId: string): string =>
   `doc:progress:${documentId}`;
+
+/** Redis channel carrying generation progress back to the WebSocket hub. */
+export const generationChannel = (targetId: string): string =>
+  `gen:progress:${targetId}`;

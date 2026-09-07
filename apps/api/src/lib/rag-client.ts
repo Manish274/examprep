@@ -209,3 +209,38 @@ export async function* ragChatStream(
     reader.releaseLock();
   }
 }
+
+export interface GradableAnswerInput {
+  question_id: string;
+  question_type: string;
+  prompt: string;
+  correct_answer: string;
+  explanation: string;
+  response: string | null;
+  options: string[] | null;
+  source_text: string;
+}
+
+export interface GradedAnswer {
+  question_id: string;
+  is_correct: boolean;
+  awarded: number;
+  feedback: string;
+}
+
+/**
+ * Grades a submitted attempt.
+ *
+ * Runs in the request rather than a job: the student is sitting in front of
+ * their results, and only the short answers need a model at all. The timeout
+ * is generous but far below the generation ceiling.
+ */
+export const gradeAnswers = (
+  answers: GradableAnswerInput[],
+  options: RagRequestOptions = {},
+): Promise<{ graded: GradedAnswer[]; score: number; max_score: number }> =>
+  ragFetch(
+    "/grade",
+    { method: "POST", body: JSON.stringify({ answers }) },
+    { timeoutMs: 180_000, ...options },
+  );

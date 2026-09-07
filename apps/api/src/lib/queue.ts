@@ -2,12 +2,15 @@ import { Queue } from "bullmq";
 import { Redis } from "ioredis";
 import {
   QUEUE_DOCUMENT_PROCESSING,
+  QUEUE_STUDY_GENERATION,
   type DocumentProcessingJob,
+  type StudyGenerationJob,
 } from "@examprep/shared";
 import { env } from "../env.js";
 
 let connection: Redis | null = null;
 let documentQueue: Queue<DocumentProcessingJob> | null = null;
+let studyQueue: Queue<StudyGenerationJob> | null = null;
 
 /**
  * BullMQ requires maxRetriesPerRequest: null so its blocking commands are not
@@ -43,9 +46,27 @@ export function documents(): Queue<DocumentProcessingJob> {
   return documentQueue;
 }
 
+/**
+ * Generation jobs retry less than ingestion: a failure there is usually a
+ * quota ceiling, and retrying hard makes that worse rather than better.
+ */
+export function study(): Queue<StudyGenerationJob> {
+  studyQueue ??= new Queue<StudyGenerationJob>(QUEUE_STUDY_GENERATION, {
+    connection: queueConnection(),
+    defaultJobOptions: {
+      attempts: 2,
+      backoff: { type: "exponential", delay: 15_000 },
+      removeOnComplete: { age: 86_400, count: 200 },
+      removeOnFail: { age: 604_800 },
+    },
+  });
+  return studyQueue;
+}
+
 export async function closeQueues(): Promise<void> {
-  await documentQueue?.close();
+  await Promise.allSettled([documentQueue?.close(), studyQueue?.close()]);
   documentQueue = null;
+  studyQueue = null;
   if (connection) {
     await connection.quit();
     connection = null;
