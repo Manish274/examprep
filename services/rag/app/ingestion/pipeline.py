@@ -1,17 +1,17 @@
-"""Ingestion pipeline: file in, chunks out.
+"""Ingestion pipeline: file in, indexed chunks out.
+
+    parse -> chunk -> embed (dense) -> encode (sparse) -> index
 
 Selects a parser by document kind and a chunker by name, both through the
 registry, so a different combination can be evaluated by changing a string
 rather than this code.
-
-Embedding and indexing arrive in Milestone 2. Until then the pipeline stops at
-chunking and hands the chunks back to the Node worker, which owns Postgres.
 """
 
 from __future__ import annotations
 
 import logging
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 from app.chunking.fixed import FixedWindowChunker
@@ -68,14 +68,18 @@ class IngestionResult:
         chunks: list[Chunk],
         chunker_name: str,
         timings: dict[str, int],
+        indexed: int = 0,
+        cache_hits: int = 0,
     ) -> None:
         self.document = document
         self.chunks = chunks
         self.chunker_name = chunker_name
         self.timings = timings
+        self.indexed = indexed
+        self.cache_hits = cache_hits
 
 
-async def ingest_document(
+async def parse_and_chunk(
     path: Path,
     *,
     document_id: str,
@@ -84,6 +88,7 @@ async def ingest_document(
     settings: Settings,
     chunker_name: str = "structural",
 ) -> IngestionResult:
+    """The stages that need no credentials and no infrastructure."""
     if not path.is_file():
         raise FileNotFoundError(f"Document not found at {path}")
 
@@ -110,7 +115,7 @@ async def ingest_document(
         )
 
     logger.info(
-        "ingested %s: %s pages, %s blocks, %s chunks (parse %sms, chunk %sms)",
+        "parsed %s: %s pages, %s blocks, %s chunks (parse %sms, chunk %sms)",
         filename,
         document.page_count,
         len(document.blocks),
@@ -125,3 +130,106 @@ async def ingest_document(
         chunker_name=chunker_name,
         timings={"parse_ms": parse_ms, "chunk_ms": chunk_ms},
     )
+
+
+async def embed_and_index(
+    result: IngestionResult,
+    *,
+    user_id: str,
+    embedder: object,
+    sparse_encoder: object,
+    store: object,
+    on_progress: Callable[[int, int], None] | None = None,
+) -> IngestionResult:
+    """Embeds the chunks and writes them to the vector store.
+
+    Dense and sparse vectors are produced from `embedding_text()`, not from the
+    raw chunk body. That prefixes the document name and heading trail, so a
+    chunk reading "It must also satisfy 2NF" still carries its subject -- and
+    on the sparse side it means a search for "Third Normal Form" matches the
+    section actually titled that.
+    """
+    chunks = result.chunks
+    texts = [chunk.embedding_text() for chunk in chunks]
+
+    started = time.perf_counter()
+    vectors = await embedder.embed_documents(texts)  # type: ignore[attr-defined]
+    embed_ms = int((time.perf_counter() - started) * 1000)
+
+    if len(vectors) != len(chunks):
+        raise RuntimeError(
+            f"embedder returned {len(vectors)} vectors for {len(chunks)} chunks"
+        )
+
+    started = time.perf_counter()
+    sparse = [sparse_encoder.encode_document(text) for text in texts]  # type: ignore[attr-defined]
+    sparse_ms = int((time.perf_counter() - started) * 1000)
+
+    if on_progress:
+        on_progress(len(chunks), len(chunks))
+
+    started = time.perf_counter()
+    # Replace rather than append: a re-ingest must not leave the previous
+    # generation of chunks in the index alongside the new one.
+    await store.delete_document(  # type: ignore[attr-defined]
+        result.document.document_id, user_id=user_id
+    )
+    indexed = await store.upsert_chunks(  # type: ignore[attr-defined]
+        chunks,
+        [v.values for v in vectors],
+        sparse,
+        user_id=user_id,
+    )
+    index_ms = int((time.perf_counter() - started) * 1000)
+
+    result.timings.update(
+        {"embed_ms": embed_ms, "sparse_ms": sparse_ms, "index_ms": index_ms}
+    )
+    result.indexed = indexed
+    result.cache_hits = int(getattr(embedder, "hits", 0))
+
+    logger.info(
+        "indexed %s chunks for %s (embed %sms, sparse %sms, index %sms)",
+        indexed,
+        result.document.filename,
+        embed_ms,
+        sparse_ms,
+        index_ms,
+    )
+    return result
+
+
+async def ingest_document(
+    path: Path,
+    *,
+    document_id: str,
+    filename: str,
+    kind: DocumentKind,
+    settings: Settings,
+    chunker_name: str = "structural",
+    user_id: str | None = None,
+    embedder: object | None = None,
+    sparse_encoder: object | None = None,
+    store: object | None = None,
+) -> IngestionResult:
+    """Full pipeline. Stops after chunking when no index target is supplied,
+    which is what the preview endpoint and the chunking tests want."""
+    result = await parse_and_chunk(
+        path,
+        document_id=document_id,
+        filename=filename,
+        kind=kind,
+        settings=settings,
+        chunker_name=chunker_name,
+    )
+
+    if user_id and embedder and sparse_encoder and store:
+        result = await embed_and_index(
+            result,
+            user_id=user_id,
+            embedder=embedder,
+            sparse_encoder=sparse_encoder,
+            store=store,
+        )
+
+    return result

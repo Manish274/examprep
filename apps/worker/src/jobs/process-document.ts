@@ -58,7 +58,7 @@ export async function processDocument(
     await report("parsing", 0, 1, `Reading ${filename}`);
 
     const result = await ingest(
-      { documentId, filename, kind, storageKey },
+      { documentId, userId, filename, kind, storageKey },
       { correlationId: job.id },
     );
 
@@ -67,10 +67,12 @@ export async function processDocument(
         pages: result.page_count,
         blocks: result.block_count,
         chunks: result.chunk_count,
+        indexed: result.indexed,
+        cacheHits: result.cache_hits,
         parser: result.parser,
         timings: result.timings,
       },
-      "parsed and chunked",
+      "parsed, embedded and indexed",
     );
 
     await setStatus("chunking", { pageCount: result.page_count });
@@ -126,6 +128,8 @@ export async function processDocument(
         parser: result.parser,
         chunker: result.chunker,
         blockCount: result.block_count,
+        indexed: result.indexed,
+        cacheHits: result.cache_hits,
         timings: result.timings,
         ...result.metadata,
       },

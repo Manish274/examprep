@@ -15,8 +15,9 @@ from typing import Any
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from app.api import health, ingest
+from app.api import health, ingest, retrieve
 from app.config import get_settings
+from app.container import Container, set_container
 
 logger = logging.getLogger("rag")
 
@@ -35,6 +36,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         settings.RERANKER_PROVIDER,
         settings.uses_mock_providers,
     )
+    container = Container(settings)
+    set_container(container)
+    try:
+        await container.startup()
+    except Exception:
+        logger.exception("vector store unavailable at startup")
+
     if settings.uses_mock_providers:
         reason = (
             "no GEMINI_API_KEY set"
@@ -47,6 +55,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             reason,
         )
     yield
+
+    await container.shutdown()
+    set_container(None)
     logger.info("rag service stopped")
 
 
@@ -63,9 +74,10 @@ def create_app() -> FastAPI:
 
     app.include_router(health.router)
     app.include_router(ingest.router)
+    app.include_router(retrieve.router)
 
     # Feature routers land here as milestones complete:
-    #   /retrieve  /chat  /generate/test  /generate/flashcards  /eval
+    #   /chat  /generate/test  /generate/flashcards  /eval
 
     @app.exception_handler(Exception)
     async def unhandled(request: Request, exc: Exception) -> JSONResponse:

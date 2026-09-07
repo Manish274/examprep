@@ -18,6 +18,10 @@ export interface RagChunk {
 
 export interface IngestResponse {
   document_id: string;
+  /** Chunks written to the vector store. */
+  indexed: number;
+  /** Embeddings served from cache rather than the provider. */
+  cache_hits: number;
   page_count: number;
   block_count: number;
   chunk_count: number;
@@ -70,6 +74,7 @@ export function describeFailure(status: number, body: string): string {
 
 export interface IngestRequest {
   documentId: string;
+  userId: string;
   filename: string;
   kind: "pdf" | "pptx" | "ppt";
   storageKey: string;
@@ -103,6 +108,7 @@ export async function ingest(
       },
       body: JSON.stringify({
         document_id: request.documentId,
+        user_id: request.userId,
         filename: request.filename,
         kind: request.kind,
         storage_key: request.storageKey,

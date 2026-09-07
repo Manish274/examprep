@@ -15,6 +15,7 @@ from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
 
 from app.api.deps import CorrelationId, InternalAuth, SettingsDep
+from app.container import get_container
 from app.core.models import Chunk, DocumentKind
 from app.ingestion.pipeline import (
     EmptyDocumentError,
@@ -30,6 +31,9 @@ router = APIRouter(tags=["ingestion"], dependencies=[InternalAuth])
 
 class IngestRequest(BaseModel):
     document_id: str
+    # Opaque here: this service never learns who a user is, only that vectors
+    # carrying a different id must never be returned to them.
+    user_id: str
     filename: str
     kind: DocumentKind
     # Opaque to this service; resolved by the configured StorageProvider.
@@ -86,6 +90,8 @@ class IngestResponse(BaseModel):
     chunk_count: int
     parser: str
     chunker: str
+    indexed: int
+    cache_hits: int
     timings: dict[str, int]
     metadata: dict[str, Any]
     chunks: list[ChunkResponse]
@@ -112,6 +118,7 @@ async def ingest(
             detail=f"No stored document for key {request.storage_key}",
         )
 
+    container = get_container()
     try:
         result = await ingest_document(
             path,
@@ -120,6 +127,10 @@ async def ingest(
             kind=request.kind,
             settings=settings,
             chunker_name=request.chunker,
+            user_id=request.user_id,
+            embedder=container.embedder,
+            sparse_encoder=container.sparse_encoder,
+            store=container.store,
         )
     except UnsupportedDocumentError as exc:
         raise HTTPException(
@@ -149,6 +160,8 @@ async def ingest(
         chunk_count=len(result.chunks),
         parser=result.document.parser,
         chunker=result.chunker_name,
+        indexed=result.indexed,
+        cache_hits=result.cache_hits,
         timings=result.timings,
         metadata=result.document.metadata,
         chunks=[ChunkResponse.from_chunk(c) for c in result.chunks],

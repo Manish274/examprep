@@ -1,18 +1,27 @@
-"""End-to-end ingestion: a real file on disk through to chunks over HTTP."""
+"""End-to-end ingestion: a real file on disk through to indexed vectors.
+
+Runs against a throwaway Qdrant collection with the mock embedder, so the whole
+path -- parse, chunk, embed, encode, index -- is exercised without spending API
+quota or touching the real collection.
+"""
 
 from __future__ import annotations
 
 import shutil
+import uuid
 from pathlib import Path
 
 import httpx
 import pytest
 
 from app.config import Settings, get_settings
+from app.container import build_test_container, set_container
 from app.main import create_app
 
 FIXTURES = Path(__file__).parent / "fixtures"
 TOKEN = "test_internal_token"
+USER = "user-under-test"
+DIMENSIONS = 256
 
 pytestmark = pytest.mark.skipif(
     not (FIXTURES / "normalization.pdf").exists(),
@@ -32,29 +41,41 @@ def uploads(tmp_path: Path) -> Path:
 
 @pytest.fixture
 async def client(uploads: Path):
-    def _settings() -> Settings:
-        return Settings(
-            INTERNAL_SERVICE_TOKEN=TOKEN,
-            STORAGE_LOCAL_PATH=uploads,
-            CHUNK_TARGET_TOKENS=120,
-            CHUNK_OVERLAP_TOKENS=24,
-            CHUNK_MIN_TOKENS=20,
-        )
+    settings = Settings(
+        INTERNAL_SERVICE_TOKEN=TOKEN,
+        STORAGE_LOCAL_PATH=uploads,
+        CHUNK_TARGET_TOKENS=120,
+        CHUNK_OVERLAP_TOKENS=24,
+        CHUNK_MIN_TOKENS=20,
+        EMBEDDING_PROVIDER="mock",
+        EMBEDDING_DIMENSIONS=DIMENSIONS,
+        QDRANT_COLLECTION=f"test_ingest_{uuid.uuid4().hex[:12]}",
+    )
+
+    container = build_test_container(settings)
+    set_container(container)
+    await container.startup()
 
     app = create_app()
-    app.dependency_overrides[get_settings] = _settings
+    app.dependency_overrides[get_settings] = lambda: settings
     transport = httpx.ASGITransport(app=app)
-    async with httpx.AsyncClient(
-        transport=transport,
-        base_url="http://test",
-        headers={"x-internal-token": TOKEN},
-    ) as client:
-        yield client
+    try:
+        async with httpx.AsyncClient(
+            transport=transport,
+            base_url="http://test",
+            headers={"x-internal-token": TOKEN},
+        ) as client:
+            yield client
+    finally:
+        await container.qdrant.delete_collection(settings.QDRANT_COLLECTION)
+        await container.shutdown()
+        set_container(None)
 
 
 def _pdf_body(**overrides: object) -> dict[str, object]:
     body: dict[str, object] = {
         "document_id": "doc-1",
+        "user_id": USER,
         "filename": "normalization.pdf",
         "kind": "pdf",
         "storage_key": "user-1/normalization.pdf",
@@ -246,3 +267,92 @@ class TestPreview:
         body = response.json()
         assert len(body["chunks"]) == 2
         assert body["chunk_count"] >= 2
+
+
+class TestIndexing:
+    """Ingestion now writes vectors, not just chunks. These assert against the
+    store itself rather than the response, since the response could report a
+    count the index never received."""
+
+    async def test_chunks_reach_the_vector_store(
+        self, client: httpx.AsyncClient
+    ) -> None:
+        from app.container import get_container
+
+        body = (await client.post("/ingest", json=_pdf_body())).json()
+        store = get_container().store
+
+        assert body["indexed"] == body["chunk_count"]
+        assert await store.count(user_id=USER) == body["chunk_count"]
+
+    async def test_indexed_chunks_are_retrievable(
+        self, client: httpx.AsyncClient
+    ) -> None:
+        from app.container import get_container
+        from app.core.models import RetrievalStrategy
+
+        await client.post("/ingest", json=_pdf_body())
+        results = await get_container().retrieval.search(
+            "3NF transitive dependency",
+            user_id=USER,
+            strategy=RetrievalStrategy.HYBRID,
+            top_k=3,
+        )
+
+        assert results
+        assert "normal form" in results[0].chunk.text.lower()
+
+    async def test_vectors_are_scoped_to_the_ingesting_user(
+        self, client: httpx.AsyncClient
+    ) -> None:
+        from app.container import get_container
+        from app.core.models import RetrievalStrategy
+
+        await client.post("/ingest", json=_pdf_body())
+        container = get_container()
+
+        assert await container.store.count(user_id="someone-else") == 0
+        assert (
+            await container.retrieval.search(
+                "3NF", user_id="someone-else", strategy=RetrievalStrategy.BM25
+            )
+            == []
+        )
+
+    async def test_reingesting_replaces_rather_than_duplicates(
+        self, client: httpx.AsyncClient
+    ) -> None:
+        # A retried job, or a re-upload after a chunker change, must not leave
+        # two generations of the same document in the index.
+        from app.container import get_container
+
+        first = (await client.post("/ingest", json=_pdf_body())).json()
+        second = (await client.post("/ingest", json=_pdf_body())).json()
+
+        assert first["chunk_count"] == second["chunk_count"]
+        assert await get_container().store.count(user_id=USER) == second["chunk_count"]
+
+    async def test_reports_embedding_and_index_timings(
+        self, client: httpx.AsyncClient
+    ) -> None:
+        timings = (await client.post("/ingest", json=_pdf_body())).json()["timings"]
+
+        for stage in ("parse_ms", "chunk_ms", "embed_ms", "sparse_ms", "index_ms"):
+            assert stage in timings
+
+    async def test_preview_does_not_index(
+        self, client: httpx.AsyncClient
+    ) -> None:
+        # Preview exists for inspecting chunk boundaries while tuning; it must
+        # not leave anything behind in the store.
+        from app.container import get_container
+
+        await client.post(
+            "/ingest/preview",
+            json={
+                "storage_key": "user-1/normalization.pdf",
+                "filename": "normalization.pdf",
+                "kind": "pdf",
+            },
+        )
+        assert await get_container().store.count() == 0

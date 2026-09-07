@@ -15,14 +15,14 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the decision record.
 
 ## Status
 
-**Milestone 1 — Ingestion and chunking. Complete.**
+**Milestone 2 — Retrieval. Complete.**
 
 | Milestone | Scope | State |
 | --- | --- | --- |
 | 0 | Monorepo, infra, schema, service skeletons, test harness | done |
 | 1 | Document ingestion, chunking, metadata preservation | done |
-| 2 | Embeddings, Qdrant index, BM25, hybrid search, RRF | next |
-| 3 | Reranking, context construction, eval harness | |
+| 2 | Embeddings, Qdrant index, BM25, hybrid search, RRF | done |
+| 3 | Reranking, context construction, eval harness | next |
 | 4 | LLM provider, grounded chat, WebSocket streaming | |
 | 5 | Test generation, grading, flashcards | |
 | 6 | Tracing, gold-set generation, retrieval metrics | |
@@ -147,9 +147,9 @@ behind an interface, and all of them are free-tier.
 
 | Component | Default | Swappable to |
 | --- | --- | --- |
-| Embeddings | `gemini-embedding-001` @ 768 dims | mock, Jina, HF Inference |
-| Generation | `gemini-2.5-flash` | mock, any OpenAI-compatible host, Ollama |
-| Reranking | Gemini listwise (RankGPT-style) | Jina reranker, no-op baseline |
+| Embeddings | `gemini-embedding-2` @ 3072 dims | mock, Jina, Voyage |
+| Generation | `gemini-3.8-flash` | any OpenAI-compatible host, Ollama |
+| Reranking | `jina-reranker-v2` (Milestone 3) | Cohere, Gemini listwise, no-op |
 | Sparse | BM25 | — |
 
 BM25 needs no model at all: term frequency, IDF and stemming, running locally.
@@ -157,6 +157,28 @@ BM25 needs no model at all: term frequency, IDF and stemming, running locally.
 Swapping any of them means implementing the matching Protocol in
 `services/rag/app/core/interfaces.py` and registering it under a name — no
 pipeline code changes.
+
+---
+
+## Inspecting retrieval
+
+All four strategies are exposed, so what a student's question actually matches
+can be read directly rather than inferred from an answer:
+
+```bash
+curl -s -X POST http://localhost:8000/retrieve -H "content-type: application/json" -H "x-internal-token: dev_internal_token_change_me" -d '{"query":"what is 3NF","user_id":"<id>","strategy":"hybrid","top_k":5}'
+```
+
+`strategy` is one of `bm25`, `dense`, `hybrid`, `hybrid_rerank`. Every result
+carries its per-stage scores and ranks — seeing that a chunk was 1st by BM25 and
+30th by dense retrieval explains a result in a way one fused number cannot.
+
+```bash
+curl -s "http://localhost:8000/retrieve/stats" -H "x-internal-token: dev_internal_token_change_me"
+```
+
+Answers the first question when retrieval returns nothing: is the corpus empty,
+or is the query bad?
 
 ---
 
@@ -181,3 +203,9 @@ Swap `structural` for `fixed_window` to see the naive baseline on the same file.
   `(model_id, sha256(chunk_text))`, making re-ingests and eval re-runs free.
 - Free-tier providers may use submitted content for product improvement. Worth
   revisiting before any real student data is involved.
+- `EMBEDDING_DIMENSIONS` is fixed once a corpus is indexed. Changing it
+  invalidates every stored vector; the service refuses to start against a
+  collection whose width disagrees rather than indexing incomparable vectors.
+- Retrieval tests run against a real Qdrant on a throwaway collection. Mocked,
+  they would pass while named vectors, the IDF modifier or payload filtering
+  were broken — none of those are our code.

@@ -48,3 +48,8 @@ htmlcov/
 
 # pytest/tooling artefacts
 services/rag/.pytest_cache/
+
+# local dev scratch (holds a live access token)
+.devtoken
+.devdoc
+.devuser
