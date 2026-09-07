@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -25,6 +26,7 @@ from pathlib import Path
 
 from app.core.models import RetrievalStrategy
 from app.eval.metrics import aggregate, evaluate_query
+from app.eval.significance import Comparison, compare_all
 
 logger = logging.getLogger(__name__)
 
@@ -89,15 +91,39 @@ def save_gold_set(queries: Sequence[GoldQuery], path: Path) -> None:
     )
 
 
+def percentile(values: Sequence[float], fraction: float) -> float:
+    """Nearest-rank percentile.
+
+    A mean latency over a rate-limited free tier says almost nothing: one
+    query that waited out a 429 drags it somewhere no query actually was.
+    """
+    if not values:
+        return 0.0
+    ordered = sorted(values)
+    index = max(0, math.ceil(fraction * len(ordered)) - 1)
+    return float(ordered[index])
+
+
 @dataclass
 class StrategyResult:
     strategy: str
     metrics: dict[str, float]
     per_query: list[dict[str, float]]
     took_ms: int
+    # Per-query latency, kept so the report can show a distribution rather
+    # than one total that hides every outlier inside it.
+    latencies_ms: list[int] = field(default_factory=list)
     # Kept so a surprising aggregate can be traced to the questions that caused
     # it, rather than only reported.
     failures: list[str] = field(default_factory=list)
+
+    @property
+    def p50_ms(self) -> float:
+        return percentile(self.latencies_ms, 0.50)
+
+    @property
+    def p95_ms(self) -> float:
+        return percentile(self.latencies_ms, 0.95)
 
 
 @dataclass
@@ -113,6 +139,18 @@ class EvaluationReport:
             return None
         return max(ranked, key=lambda s: s.metrics[metric])
 
+    def significance(
+        self,
+        baseline: str = "hybrid_rerank",
+        metrics: Sequence[str] = ("mrr", "ndcg@5", "recall@5"),
+    ) -> list[Comparison]:
+        """Whether the gaps in the table survive the size of the gold set."""
+        return compare_all(
+            {s.strategy: s.per_query for s in self.strategies},
+            baseline,
+            metrics=metrics,
+        )
+
     def to_dict(self) -> dict:
         return {
             "query_count": self.query_count,
@@ -122,8 +160,14 @@ class EvaluationReport:
                 {
                     "strategy": s.strategy,
                     "took_ms": s.took_ms,
+                    "p50_ms": s.p50_ms,
+                    "p95_ms": s.p95_ms,
                     "metrics": s.metrics,
                     "failed_queries": s.failures,
+                    # Emitted so a saved report can be re-analysed later --
+                    # significance, per-question breakdowns, a different
+                    # metric -- without paying for the retrieval again.
+                    "per_query": s.per_query,
                 }
                 for s in self.strategies
             ],
@@ -136,7 +180,11 @@ class EvaluationReport:
             metrics
             or ["recall@5", "precision@5", "mrr", "ndcg@5", "hit@5"]
         )
-        header = f"{'strategy':<16}" + "".join(f"{m:>13}" for m in shown) + f"{'ms':>9}"
+        header = (
+            f"{'strategy':<16}"
+            + "".join(f"{m:>13}" for m in shown)
+            + f"{'p50 ms':>9}{'p95 ms':>9}"
+        )
         lines = [header, "-" * len(header)]
 
         # Mark the winner per column so the comparison reads at a glance.
@@ -150,7 +198,10 @@ class EvaluationReport:
                 value = result.metrics.get(metric, 0.0)
                 marker = "*" if value == best[metric] and value > 0 else " "
                 cells += f"{value:>12.3f}{marker}"
-            lines.append(f"{result.strategy:<16}{cells}{result.took_ms:>9}")
+            lines.append(
+                f"{result.strategy:<16}{cells}"
+                f"{result.p50_ms:>9.0f}{result.p95_ms:>9.0f}"
+            )
         return "\n".join(lines)
 
 
@@ -183,7 +234,9 @@ class EvaluationHarness:
             per_query: list[dict[str, float]] = []
             failures: list[str] = []
 
+            latencies: list[int] = []
             for query in gold:
+                query_started = time.perf_counter()
                 try:
                     retrieved = await self._retrieval.search(  # type: ignore[attr-defined]
                         query.question,
@@ -201,6 +254,7 @@ class EvaluationHarness:
                     failures.append(query.question)
                     continue
 
+                latencies.append(int((time.perf_counter() - query_started) * 1000))
                 per_query.append(
                     evaluate_query(
                         [r.chunk.id for r in retrieved],
@@ -216,6 +270,7 @@ class EvaluationHarness:
                     metrics=aggregate(per_query),
                     per_query=per_query,
                     took_ms=int((time.perf_counter() - started) * 1000),
+                    latencies_ms=latencies,
                     failures=failures,
                 )
             )

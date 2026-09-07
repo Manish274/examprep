@@ -15,7 +15,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the decision record.
 
 ## Status
 
-**Milestone 5 — Study tools. Complete.**
+**Milestone 6 — Tracing and observability. Complete.**
 
 | Milestone | Scope | State |
 | --- | --- | --- |
@@ -25,7 +25,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the decision record.
 | 3 | Reranking, context construction, eval harness | done |
 | 4 | LLM provider, grounded chat, WebSocket streaming | done |
 | 5 | Test generation, grading, flashcards | done |
-| 6 | Tracing, observability, evaluation at scale | next |
+| 6 | Tracing, observability, evaluation at scale | done |
 
 ---
 
@@ -299,9 +299,92 @@ The first measured baseline is recorded in
 favour hybrid+reranking, which is why it is written down.
 
 Chunk ids are derived from `(document_id, sha256(text))` rather than generated
-randomly, so reprocessing a document — a retry, a chunker change, a worker
-rerun — keeps a gold set valid. Re-*uploading* the file creates a new document
-id and therefore new chunk ids, so a gold set is tied to one upload.
+randomly, so a retry or a worker rerun keeps a gold set valid. Anything that
+changes a chunk's **text** does not: a chunker change, a parser fix, or
+enabling the vision pass rewrites the hash and therefore the id. That happened
+here, and every id in the NLP gold set went stale at once. Two guards now
+exist — the eval endpoint refuses a gold set whose ids are all absent from the
+index rather than reporting `Recall@5 = 0.000` for every strategy, and
+`scripts/remap_gold_set.py` repoints a stale set by matching each entry's
+recorded section heading:
+
+```bash
+cd services/rag && .venv/Scripts/python.exe scripts/remap_gold_set.py --user <id> --gold gold_sets/nlp-lecture.jsonl --dry-run
+```
+
+Differences between strategies are reported with a **paired bootstrap and a
+sign test**, because on a gold set of nineteen questions a gap of a few points
+is not a result:
+
+```
+metric      strategy        vs                   diff              95% CI       p     W-L-T   sign p
+mrr         hybrid          dense              -0.211     [-0.333,-0.088]  0.000*    0-8-11    0.008
+```
+
+Saved reports carry per-query metrics, so a past run can be re-analysed against
+a different baseline for free:
+
+```bash
+cd services/rag && .venv/Scripts/python.exe scripts/evaluate.py --analyse reports/m6-nlp-lecture.json --baseline hybrid_rerank --user x --gold x
+```
+
+
+---
+
+## Observability
+
+Every stage of a request records what it did: how the question was rewritten,
+which chunks came back and in what order, how far the reranker moved them, how
+much context was built, and which sources the answer actually cited. Spans go
+to the `traces` table by default, and to Langfuse as well if it is configured:
+
+```
+TRACER=postgres            # or: langfuse, postgres,langfuse, none
+LANGFUSE_PUBLIC_KEY=
+LANGFUSE_SECRET_KEY=
+LANGFUSE_HOST=http://localhost:3000
+```
+
+Two rules hold everywhere: a trace never fails a request, and never slows one
+down. Writes go onto a bounded queue drained by a background task, and every
+failure is counted rather than raised. Those counters are on `/health`, so a
+sink that is silently dropping everything is visible:
+
+```json
+"tracing": {"sink": "postgres", "written": 128, "dropped": 0, "failed": 0, "queued": 0}
+```
+
+Read the table back by stage, or follow one operation end to end:
+
+```bash
+cd services/rag && .venv/Scripts/python.exe scripts/traces.py --hours 6
+cd services/rag && .venv/Scripts/python.exe scripts/traces.py --correlation <message-id>
+```
+
+```
+- retrieve  (2036ms, ok)
+     output: {"returned": 8, "chunk_ids": [...], "scores": [0.1895, 0.0362, ...]}
+- rerank  (1097ms, ok)
+     output: {"returned": 8, "top_changed": false, "max_promotion": 12, "mean_abs_shift": 4.75}
+- generate  (16123ms, FAILED)
+     error: RuntimeError: llm complete failed after 4 attempts: llm rate limited: 429 ...
+```
+
+That example is the point of the whole thing: the student saw "Chat failed",
+and the trace says retrieval was healthy and found the right passage at rank 1
+— only generation was rate limited. The two failures need completely different
+responses and are indistinguishable from the outside.
+
+The same data is available over the API, scoped to the owner, since a trace
+holds which of a student's documents matched and what was in them:
+
+```bash
+curl -s http://localhost:3001/api/traces?hours=24 -H "authorization: Bearer <token>"
+curl -s http://localhost:3001/api/traces/<message-id> -H "authorization: Bearer <token>"
+```
+
+The correlation id is the assistant message id, so "why did it answer that?" is
+a single lookup.
 
 ---
 

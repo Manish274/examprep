@@ -8,6 +8,7 @@ import httpx
 from fastapi import APIRouter
 
 from app.api.deps import SettingsDep
+from app.container import get_container
 
 router = APIRouter(tags=["health"])
 
@@ -43,6 +44,21 @@ async def health(settings: SettingsDep) -> dict[str, Any]:
         },
         "mock_mode": settings.uses_mock_providers,
         "gemini_key_present": settings.has_gemini_key,
+        # Reported rather than assumed. A sink that is dropping or failing
+        # every record looks exactly like a healthy one from the outside,
+        # which is the failure mode observability can least afford.
+        "tracing": _tracer_stats(),
+    }
+
+
+def _tracer_stats() -> dict[str, Any]:
+    try:
+        tracer = get_container().tracer
+    except RuntimeError:
+        return {"sink": "unavailable"}
+    return {
+        "sink": getattr(tracer, "name", "unknown"),
+        **getattr(tracer, "stats", dict)(),
     }
 
 

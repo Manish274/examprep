@@ -136,3 +136,125 @@ Recorded because it contradicts the assumption the pipeline was built on. The
 architecture supports all four strategies precisely so this could be measured
 rather than asserted — and the measurement does not favour the most elaborate
 option.
+
+---
+
+# Run 3 — same deck, larger corpus, with significance testing
+
+Recorded 2026-09-07, Milestone 6. Two things changed since run 2, and both
+matter for reading the numbers.
+
+**The gold set had gone stale.** Chunk ids are `uuid5(document_id,
+sha256(text))`. The vision pass changed the text of the chunks it enriched, so
+every id changed, and *none* of the 19 gold ids still existed in the index.
+Run against it unmodified, all four strategies would have scored Recall@5 =
+0.000 and the report would have read as a total collapse. The questions were
+fine; only the pointers were stale. `scripts/remap_gold_set.py` repointed all
+19 by matching each entry's recorded section heading, and the eval endpoint now
+refuses a gold set whose ids are all absent rather than reporting zeroes.
+
+**The corpus is now both documents**, 40 chunks rather than 20 — the NLP deck
+plus the unrelated study guide. Queries are not restricted to one document, so
+half the corpus is now distractors on a different subject.
+
+| | |
+|---|---|
+| Corpus | NLP lecture deck + study guide — 40 chunks |
+| Gold set | the same 19 questions, remapped |
+| Baseline for comparison | `dense` |
+
+```
+strategy             recall@5  precision@5          mrr       ndcg@5        hit@5   p50 ms   p95 ms
+---------------------------------------------------------------------------------------------------
+bm25                   0.737        0.147        0.443        0.501        0.737        12       15
+dense                  1.000*       0.200*       0.912*       0.935*       1.000*      732     2060
+hybrid                 0.842        0.168        0.702        0.719        0.842       736      907
+hybrid_rerank          0.947        0.189        0.756        0.801        0.947      1778    64027
+```
+
+## Is any of that real? — paired bootstrap and sign test
+
+```
+metric      strategy        vs                   diff              95% CI       p     W-L-T   sign p
+----------------------------------------------------------------------------------------------------
+mrr         bm25            dense              -0.469     [-0.607,-0.329]  0.000*    0-15-4    0.000
+ndcg@5      bm25            dense              -0.434     [-0.577,-0.296]  0.000*    0-15-4    0.000
+recall@5    bm25            dense              -0.263     [-0.474,-0.105]  0.007*    0-5-14    0.062
+mrr         hybrid          dense              -0.211     [-0.333,-0.088]  0.000*    0-8-11    0.008
+ndcg@5      hybrid          dense              -0.216     [-0.348,-0.091]  0.000*    0-8-11    0.008
+recall@5    hybrid          dense              -0.158     [-0.316,+0.000]  0.076     0-3-16    0.250
+mrr         hybrid_rerank   dense              -0.156     [-0.297,-0.009]  0.041*    1-7-11    0.070
+ndcg@5      hybrid_rerank   dense              -0.134     [-0.249,-0.015]  0.029*    1-7-11    0.070
+recall@5    hybrid_rerank   dense              -0.053     [-0.158,+0.000]  0.726     0-1-18    1.000
+```
+
+Read the W-L-T column first. **BM25 does not beat dense on a single question of
+the nineteen** — 0 wins, 15 losses, 4 ties on MRR. That is not a close result
+and no amount of small-sample caution changes it.
+
+**Hybrid loses to dense on ranking with real evidence behind it**: 0-8-11, sign
+test p = 0.008. Fusion never once put the right passage higher than dense did.
+
+**Hybrid+reranking against dense is the genuinely marginal case, and the two
+tests disagree.** The bootstrap calls the MRR gap significant (p = 0.041); the
+sign test does not (p = 0.070), because only 8 of 19 questions are decisive at
+all. The honest reading is *dense is ahead, and 19 questions is not enough to
+say by how much*. The recall difference is plainly noise (p = 0.726).
+
+## Why fusion cannot help at this size — measured, not argued
+
+The new `fuse` span records how much the two retrievers agree. On a real query
+against one document:
+
+```
+fuse: {"dense": 20, "sparse": 20, "overlap": 20, "dense_only_in_top": 0}
+```
+
+Both retrievers returned **the same 20 chunks** — the entire document. When the
+candidate sets are identical, fusion cannot add recall, because there is
+nothing for either retriever to contribute that the other missed. All RRF can
+do is reorder, and reordering the better retriever's list using the worse one's
+opinion is a loss by construction. That is the mechanism behind three runs of
+`dense > hybrid`, and it is now a number rather than a hypothesis.
+
+This also says exactly when to re-test: **when the corpora are large enough
+that the two retrievers stop returning the same set.** Overlap is recorded on
+every hybrid query, so that threshold is now observable rather than guessed at.
+
+## And reranking does not earn its place over plain hybrid
+
+Re-running the same saved report against `hybrid_rerank` as the baseline costs
+nothing — the per-query metrics are in the file:
+
+```bash
+python scripts/evaluate.py --analyse reports/m6-nlp-lecture.json --baseline hybrid_rerank
+```
+
+```
+mrr         hybrid          hybrid_rerank      -0.054     [-0.202,+0.080]  0.449     3-4-12    1.000
+ndcg@5      hybrid          hybrid_rerank      -0.082     [-0.230,+0.039]  0.225     2-4-13    0.688
+recall@5    hybrid          hybrid_rerank      -0.105     [-0.263,+0.000]  0.241     0-2-17    0.500
+```
+
+Reranking wins 4 questions and loses 3. On this corpus the Jina cross-encoder —
+a third-party call in the request path, ~1s per query, its own rate limit — is
+**not measurably better than the fused order it is reranking**. It is not
+harmful either; it is simply not paying for itself yet.
+
+## Latency
+
+`hybrid_rerank` p95 is **64 seconds**, against a p50 of 1.8s. That is a single
+Jina rate-limit stall, and it is exactly what a mean would have hidden. Dense
+is 732ms at p50 with no external reranker call at all.
+
+## What changed in the recommendation
+
+Nothing — but it is now supported rather than asserted:
+
+- **Default to dense.** Ahead on every metric, ~2.4× faster at p50, and with no
+  third-party reranker in the request path.
+- **Keep BM25 indexed.** It costs nothing and it is 60× faster; its weakness
+  here is a corpus-size artefact, and the `fuse` overlap number will show when
+  that stops being true.
+- **19 questions is still the binding constraint.** Every "not significant"
+  above mostly means "not enough questions", not "no difference".

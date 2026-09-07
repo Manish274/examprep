@@ -19,6 +19,7 @@ from app.chunking.structural import StructuralChunker
 from app.config import Settings
 from app.core.models import Chunk, DocumentKind, ParsedDocument
 from app.ingestion.vision_enrichment import enrich_with_vision
+from app.observability.trace import span
 from app.parsing.pdf import PyMuPDFParser
 from app.parsing.pptx import PythonPptxParser
 
@@ -99,7 +100,16 @@ async def parse_and_chunk(
     parser = select_parser(kind)
 
     started = time.perf_counter()
-    document = await parser.parse(path, document_id=document_id, filename=filename)
+    async with span("parse", filename=filename, kind=kind.value) as observed:
+        document = await parser.parse(
+            path, document_id=document_id, filename=filename
+        )
+        observed.output(
+            pages=document.page_count,
+            blocks=len(document.blocks),
+            images=len(document.images),
+        )
+        observed.meta(parser=parser.name)
     parse_ms = int((time.perf_counter() - started) * 1000)
 
     # Images are read before the empty-document check, because a scanned PDF
@@ -108,14 +118,16 @@ async def parse_and_chunk(
     vision_ms = 0
     if vision is not None and document.images:
         started = time.perf_counter()
-        result = await enrich_with_vision(
-            document,
-            vision,
-            min_pixels=settings.VISION_MIN_PIXELS,
-            max_images=settings.VISION_MAX_IMAGES,
-        )
+        async with span("vision", candidates=len(document.images)) as observed:
+            result = await enrich_with_vision(
+                document,
+                vision,
+                min_pixels=settings.VISION_MIN_PIXELS,
+                max_images=settings.VISION_MAX_IMAGES,
+            )
+            vision_stats = result.as_dict()
+            observed.output(**vision_stats)
         vision_ms = int((time.perf_counter() - started) * 1000)
-        vision_stats = result.as_dict()
 
     if not document.blocks:
         raise EmptyDocumentError(
@@ -124,7 +136,19 @@ async def parse_and_chunk(
         )
 
     started = time.perf_counter()
-    chunks = build_chunker(chunker_name, settings).chunk(document)
+    async with span(
+        "chunk", chunker=chunker_name, blocks=len(document.blocks)
+    ) as observed:
+        chunks = build_chunker(chunker_name, settings).chunk(document)
+        observed.output(
+            chunks=len(chunks),
+            tokens=sum(c.token_count for c in chunks),
+            median_tokens=(
+                sorted(c.token_count for c in chunks)[len(chunks) // 2]
+                if chunks
+                else 0
+            ),
+        )
     chunk_ms = int((time.perf_counter() - started) * 1000)
 
     if not chunks:
@@ -177,7 +201,15 @@ async def embed_and_index(
     texts = [chunk.embedding_text() for chunk in chunks]
 
     started = time.perf_counter()
-    vectors = await embedder.embed_documents(texts)  # type: ignore[attr-defined]
+    async with span("embed", chunks=len(texts)) as observed:
+        vectors = await embedder.embed_documents(texts)  # type: ignore[attr-defined]
+        observed.output(vectors=len(vectors))
+        # Cache hits are the difference between a re-ingest costing a quota
+        # day and costing nothing, so they belong in the trace.
+        observed.meta(
+            cache_hits=getattr(embedder, "hits", 0),
+            cache_misses=getattr(embedder, "misses", 0),
+        )
     embed_ms = int((time.perf_counter() - started) * 1000)
 
     if len(vectors) != len(chunks):
@@ -193,17 +225,19 @@ async def embed_and_index(
         on_progress(len(chunks), len(chunks))
 
     started = time.perf_counter()
-    # Replace rather than append: a re-ingest must not leave the previous
-    # generation of chunks in the index alongside the new one.
-    await store.delete_document(  # type: ignore[attr-defined]
-        result.document.document_id, user_id=user_id
-    )
-    indexed = await store.upsert_chunks(  # type: ignore[attr-defined]
-        chunks,
-        [v.values for v in vectors],
-        sparse,
-        user_id=user_id,
-    )
+    async with span("index", chunks=len(chunks)) as observed:
+        # Replace rather than append: a re-ingest must not leave the previous
+        # generation of chunks in the index alongside the new one.
+        await store.delete_document(  # type: ignore[attr-defined]
+            result.document.document_id, user_id=user_id
+        )
+        indexed = await store.upsert_chunks(  # type: ignore[attr-defined]
+            chunks,
+            [v.values for v in vectors],
+            sparse,
+            user_id=user_id,
+        )
+        observed.output(indexed=indexed)
     index_ms = int((time.perf_counter() - started) * 1000)
 
     result.timings.update(

@@ -19,6 +19,7 @@ from app.core.models import QuestionType
 from app.generation.exams import ExamGenerator
 from app.generation.flashcards import FlashcardGenerator
 from app.generation.grading import GradableAnswer, Grader
+from app.observability.trace import identify, span
 
 logger = logging.getLogger(__name__)
 
@@ -70,18 +71,26 @@ async def generate_test(
     correlation_id: CorrelationId = None,
 ) -> GenerateTestResponse:
     container = get_container()
+    identify(user_id=request.user_id)
     # Sampled wider than the question count so the generator can skip passages
     # carrying nothing examinable.
     chunks = await _load_chunks(
         request.user_id, request.document_ids, request.question_count * 4
     )
 
-    result = await ExamGenerator(container.llm).generate(
-        chunks,
-        question_count=request.question_count,
-        types=request.types,
+    async with span(
+        "generate_questions",
+        requested=request.question_count,
+        chunks=len(chunks),
         difficulty=request.difficulty,
-    )
+    ) as observed:
+        result = await ExamGenerator(container.llm).generate(
+            chunks,
+            question_count=request.question_count,
+            types=request.types,
+            difficulty=request.difficulty,
+        )
+        observed.output(**result.as_dict())
 
     if not result.questions:
         # Blaming the material when every call was rate limited sends the
@@ -143,13 +152,18 @@ async def generate_flashcards(
     correlation_id: CorrelationId = None,
 ) -> GenerateFlashcardsResponse:
     container = get_container()
+    identify(user_id=request.user_id)
     chunks = await _load_chunks(
         request.user_id, request.document_ids, request.card_count * 3
     )
 
-    result = await FlashcardGenerator(container.llm).generate(
-        chunks, card_count=request.card_count
-    )
+    async with span(
+        "generate_cards", requested=request.card_count, chunks=len(chunks)
+    ) as observed:
+        result = await FlashcardGenerator(container.llm).generate(
+            chunks, card_count=request.card_count
+        )
+        observed.output(**result.as_dict())
 
     if not result.cards:
         if result.batches_run == 0 and result.failed_batches:
@@ -213,21 +227,34 @@ async def grade(
         raise HTTPException(400, "No answers to grade")
 
     container = get_container()
-    graded = await Grader(container.llm).grade(
-        [
-            GradableAnswer(
-                question_id=a.question_id,
-                question_type=a.question_type,
-                prompt=a.prompt,
-                correct_answer=a.correct_answer,
-                explanation=a.explanation,
-                response=a.response,
-                options=a.options,
-                source_text=a.source_text,
-            )
-            for a in request.answers
-        ]
-    )
+    written = sum(1 for a in request.answers if a.question_type == "short_answer")
+    async with span(
+        "grade",
+        answers=len(request.answers),
+        # Only the written ones cost a model call; the split explains the
+        # latency of an otherwise identical-looking submission.
+        written=written,
+    ) as observed:
+        graded = await Grader(container.llm).grade(
+            [
+                GradableAnswer(
+                    question_id=a.question_id,
+                    question_type=a.question_type,
+                    prompt=a.prompt,
+                    correct_answer=a.correct_answer,
+                    explanation=a.explanation,
+                    response=a.response,
+                    options=a.options,
+                    source_text=a.source_text,
+                )
+                for a in request.answers
+            ]
+        )
+        observed.output(
+            correct=sum(1 for g in graded if g.is_correct),
+            awarded=round(sum(g.awarded for g in graded), 2),
+            out_of=len(graded),
+        )
 
     return GradeResponse(
         graded=[

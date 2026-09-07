@@ -21,6 +21,7 @@ from pydantic import BaseModel, Field
 from app.api.deps import CorrelationId, InternalAuth, SettingsDep
 from app.container import get_container
 from app.core.models import RetrievalStrategy, ScoredChunk
+from app.observability.trace import identify
 
 logger = logging.getLogger(__name__)
 
@@ -103,6 +104,7 @@ async def retrieve(
     correlation_id: CorrelationId = None,
 ) -> RetrieveResponse:
     container = get_container()
+    identify(user_id=request.user_id)
 
     started = time.perf_counter()
     try:

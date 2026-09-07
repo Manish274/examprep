@@ -25,6 +25,7 @@ from app.api.deps import CorrelationId, InternalAuth, SettingsDep
 from app.container import get_container
 from app.core.models import ExplanationMode, RetrievalStrategy, Source
 from app.generation.chat import ChatRequest, ChatResult, ChatTurn
+from app.observability.trace import identify
 
 logger = logging.getLogger(__name__)
 
@@ -96,6 +97,7 @@ async def chat(
     if container.chat is None:
         raise HTTPException(503, "Chat is not configured on this service")
 
+    identify(user_id=payload.user_id)
     try:
         result = await container.chat.answer(_to_request(payload))
     except Exception as exc:
@@ -125,6 +127,7 @@ async def chat_stream(
     if container.chat is None:
         raise HTTPException(503, "Chat is not configured on this service")
 
+    identify(user_id=payload.user_id)
     request = _to_request(payload)
 
     async def events() -> AsyncIterator[str]:

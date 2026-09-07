@@ -26,6 +26,7 @@ import logging
 import time
 from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 
 from app.core.models import (
     ExplanationMode,
@@ -43,6 +44,7 @@ from app.generation.prompts import (
     system_prompt,
     user_prompt,
 )
+from app.observability.trace import current_trace, span
 
 logger = logging.getLogger(__name__)
 
@@ -109,27 +111,41 @@ class ChatService:
             return request.question
 
         history = [(t.role, t.content) for t in request.history]
-        try:
-            response = await self._utility_llm.complete(  # type: ignore[attr-defined]
-                [
-                    LLMMessage(
-                        role="user",
-                        content=condense_prompt(request.question, history),
-                    )
-                ],
-                temperature=0.0,
-                max_tokens=2000,
-            )
-        except Exception as exc:
-            logger.warning("condensing failed (%s); using the question as asked", exc)
-            return request.question
+        async with span(
+            "condense", question=request.question, turns=len(history)
+        ) as observed:
+            try:
+                response = await self._utility_llm.complete(  # type: ignore[attr-defined]
+                    [
+                        LLMMessage(
+                            role="user",
+                            content=condense_prompt(request.question, history),
+                        )
+                    ],
+                    temperature=0.0,
+                    max_tokens=2000,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "condensing failed (%s); using the question as asked", exc
+                )
+                # Recorded rather than raised: the fallback is silent to the
+                # student, so without this the trace would show a question that
+                # was never actually rewritten and no reason why.
+                observed.output(rewritten=request.question, fell_back=True)
+                observed.meta(reason=str(exc)[:200])
+                return request.question
 
-        rewritten = response.text.strip().strip('"')
-        # A model that returns nothing, or an essay, has misunderstood the task
-        # -- the original question is a safer retrieval query than either.
-        if not rewritten or len(rewritten) > 500:
-            return request.question
-        return rewritten
+            rewritten = response.text.strip().strip('"')
+            # A model that returns nothing, or an essay, has misunderstood the
+            # task -- the original question is a safer retrieval query.
+            if not rewritten or len(rewritten) > 500:
+                observed.output(rewritten=request.question, fell_back=True)
+                observed.meta(reason="empty or over-long rewrite")
+                return request.question
+
+            observed.output(rewritten=rewritten, fell_back=False)
+            return rewritten
 
     async def gather(
         self, request: ChatRequest
@@ -142,16 +158,37 @@ class ChatService:
         timings["condense_ms"] = int((time.perf_counter() - started) * 1000)
 
         started = time.perf_counter()
-        chunks: Sequence[ScoredChunk] = await self._retrieval.search(  # type: ignore[attr-defined]
-            query,
-            user_id=request.user_id,
-            strategy=request.strategy,
-            document_ids=request.document_ids,
+        async with span(
+            "retrieve",
+            query=query,
+            strategy=request.strategy.value,
             top_k=request.top_k,
-        )
+        ) as observed:
+            chunks: Sequence[ScoredChunk] = await self._retrieval.search(  # type: ignore[attr-defined]
+                query,
+                user_id=request.user_id,
+                strategy=request.strategy,
+                document_ids=request.document_ids,
+                top_k=request.top_k,
+            )
+            # The ids and scores are the whole point of a retrieval trace: an
+            # answer that cited the wrong passage is diagnosed by looking at
+            # what was ranked above the right one.
+            observed.output(
+                returned=len(chunks),
+                chunk_ids=[c.chunk.id for c in chunks[:10]],
+                scores=[round(c.score, 4) for c in chunks[:10]],
+            )
         timings["retrieve_ms"] = int((time.perf_counter() - started) * 1000)
 
-        context = self._context.build(chunks)  # type: ignore[attr-defined]
+        async with span("build_context") as observed:
+            context = self._context.build(chunks)  # type: ignore[attr-defined]
+            observed.output(
+                sources=len(context.sources),
+                context_tokens=context.token_count,
+                dropped=context.dropped,
+            )
+
         timings["retrieved"] = len(chunks)
         return context, query, timings
 
@@ -213,15 +250,62 @@ class ChatService:
             )
 
         started = time.perf_counter()
-        response = await self._llm.complete(  # type: ignore[attr-defined]
-            self._messages(request, context), temperature=0.2, max_tokens=4000
-        )
-        timings["generate_ms"] = int((time.perf_counter() - started) * 1000)
+        async with span(
+            "generate",
+            mode=request.mode.value,
+            context_tokens=context.token_count,
+            sources=len(context.sources),
+        ) as observed:
+            response = await self._llm.complete(  # type: ignore[attr-defined]
+                self._messages(request, context), temperature=0.2, max_tokens=4000
+            )
+            timings["generate_ms"] = int((time.perf_counter() - started) * 1000)
 
-        result = self._finish(response.text, context, query, timings)
-        result.prompt_tokens = response.usage.prompt_tokens
-        result.completion_tokens = response.usage.completion_tokens
+            result = self._finish(response.text, context, query, timings)
+            result.prompt_tokens = response.usage.prompt_tokens
+            result.completion_tokens = response.usage.completion_tokens
+            observed.output(
+                unsupported=result.unsupported,
+                cited=[s.marker for s in result.sources],
+                dangling=result.dangling_citations,
+                characters=len(result.text),
+            )
+            observed.meta(
+                prompt_tokens=result.prompt_tokens,
+                completion_tokens=result.completion_tokens,
+            )
         return result
+
+    async def _record_generation(
+        self,
+        request: ChatRequest,
+        context: BuiltContext,
+        started_at: datetime,
+        timings: dict[str, int],
+        **output: object,
+    ) -> None:
+        """Records the generate span of a streamed answer.
+
+        Recorded by hand rather than with `span`, because that would have to
+        wrap a loop that yields to the caller -- and a client disconnecting
+        mid-answer would then unwind the context manager during generator
+        cleanup, where awaiting is a good deal more delicate than it looks.
+        """
+        trace = current_trace()
+        if trace is None:
+            return
+        await trace.record(
+            "generate",
+            input={
+                "mode": request.mode.value,
+                "context_tokens": context.token_count,
+                "sources": len(context.sources),
+                "streamed": True,
+            },
+            output=dict(output),
+            duration_ms=timings.get("generate_ms"),
+            started_at=started_at,
+        )
 
     async def stream(
         self, request: ChatRequest
@@ -246,6 +330,7 @@ class ChatService:
             return
 
         started = time.perf_counter()
+        started_at = datetime.now(timezone.utc)
         buffer: list[str] = []
         held: list[str] = []
         refused = False
@@ -281,6 +366,9 @@ class ChatService:
         raw = "".join(buffer).strip()
 
         if refused or is_refusal(raw):
+            await self._record_generation(
+                request, context, started_at, timings, unsupported=True
+            )
             yield "token", UNSUPPORTED_REPLY
             yield "done", ChatResult(
                 text=UNSUPPORTED_REPLY,
@@ -291,4 +379,15 @@ class ChatService:
             )
             return
 
-        yield "done", self._finish(raw, context, query, timings)
+        result = self._finish(raw, context, query, timings)
+        await self._record_generation(
+            request,
+            context,
+            started_at,
+            timings,
+            unsupported=result.unsupported,
+            cited=[s.marker for s in result.sources],
+            dangling=result.dangling_citations,
+            characters=len(result.text),
+        )
+        yield "done", result

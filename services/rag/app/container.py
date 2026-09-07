@@ -26,6 +26,13 @@ from app.embedding.mock import MockEmbeddingProvider
 from app.generation.chat import ChatService
 from app.generation.context import ContextBuilder
 from app.generation.llm import GeminiLLMProvider, MockLLMProvider
+from app.observability.sinks import (
+    InMemoryTracer,
+    LangfuseTracer,
+    MultiTracer,
+    NoOpTracer,
+    PostgresTracer,
+)
 from app.reranking.rerankers import (
     GeminiListwiseReranker,
     JinaReranker,
@@ -180,11 +187,59 @@ def build_llm(settings: Settings, *, utility: bool = False) -> object:
     )
 
 
+
+def build_tracer(settings: Settings) -> object:
+    """Selects where trace records go.
+
+    Accepts a comma-separated list, because the local table and Langfuse answer
+    different questions and there is no reason to pick one: `postgres,langfuse`
+    writes to both.
+
+    A misconfigured sink raises at startup rather than degrading to noop. The
+    whole value of a trace is that it is there when something surprising has
+    already happened -- discovering then that tracing had quietly switched
+    itself off is the one failure worth being loud about.
+    """
+    names = [n.strip().lower() for n in settings.TRACER.split(",") if n.strip()]
+    if not names or names == ["none"]:
+        return NoOpTracer()
+
+    sinks: list[object] = []
+    for name in names:
+        if name in {"none", "noop"}:
+            sinks.append(NoOpTracer())
+        elif name == "memory":
+            sinks.append(InMemoryTracer())
+        elif name == "postgres":
+            sinks.append(PostgresTracer(settings.DATABASE_URL))
+        elif name == "langfuse":
+            if not (settings.LANGFUSE_PUBLIC_KEY and settings.LANGFUSE_SECRET_KEY):
+                raise RuntimeError(
+                    "TRACER includes 'langfuse' but LANGFUSE_PUBLIC_KEY or "
+                    "LANGFUSE_SECRET_KEY is empty."
+                )
+            sinks.append(
+                LangfuseTracer(
+                    settings.LANGFUSE_PUBLIC_KEY,
+                    settings.LANGFUSE_SECRET_KEY,
+                    settings.LANGFUSE_HOST,
+                )
+            )
+        else:
+            raise ValueError(
+                f"Unknown TRACER '{name}'. "
+                "Available: postgres, langfuse, memory, none"
+            )
+
+    return sinks[0] if len(sinks) == 1 else MultiTracer(sinks)
+
+
 class Container:
     """Holds the wired pipeline and owns the lifetimes of its clients."""
 
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
+        self.tracer = build_tracer(settings)
         self.embedder = build_embedder(settings)
         self.sparse_encoder = Bm25Encoder()
         self.reranker = build_reranker(settings)
@@ -235,6 +290,9 @@ class Container:
         )
 
     async def shutdown(self) -> None:
+        # Flushed first: the last spans of a run are the ones explaining why it
+        # is shutting down.
+        await self.tracer.close()  # type: ignore[attr-defined]
         cache = getattr(self.embedder, "_cache", None)
         if isinstance(cache, PostgresEmbeddingCache):
             await cache.close()
@@ -259,9 +317,12 @@ def build_test_container(settings: Settings) -> Container:
     """A container with the embedding cache held in memory.
 
     Tests must not depend on Postgres being reachable, and must not pollute the
-    shared cache with vectors from throwaway fixtures.
+    shared cache with vectors from throwaway fixtures. The same applies to
+    traces: a test asserting on what was recorded should read it back from
+    memory, not from a database it did not start.
     """
     container = Container(settings)
+    container.tracer = InMemoryTracer()
     if isinstance(container.embedder, CachedEmbeddingProvider):
         container.embedder = CachedEmbeddingProvider(
             container.embedder._inner, InMemoryEmbeddingCache()

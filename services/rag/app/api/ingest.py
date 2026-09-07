@@ -22,6 +22,7 @@ from app.ingestion.pipeline import (
     UnsupportedDocumentError,
     ingest_document,
 )
+from app.observability.trace import identify
 from app.storage.local import LocalFilesystemStorage
 
 logger = logging.getLogger(__name__)
@@ -124,6 +125,7 @@ async def ingest(
         )
 
     container = get_container()
+    identify(user_id=request.user_id)
     try:
         result = await ingest_document(
             path,

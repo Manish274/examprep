@@ -9,6 +9,7 @@ import { documentRoutes } from "./routes/documents.js";
 import { chatRoutes } from "./routes/chat.js";
 import { testRoutes } from "./routes/tests.js";
 import { flashcardRoutes } from "./routes/flashcards.js";
+import { traceRoutes } from "./routes/traces.js";
 import { notFound } from "./lib/errors.js";
 import type { AppEnv } from "./types.js";
 
@@ -44,6 +45,7 @@ export function createApp() {
   app.route("/api/chat", chatRoutes);
   app.route("/api/tests", testRoutes);
   app.route("/api/flashcards", flashcardRoutes);
+  app.route("/api/traces", traceRoutes);
 
   app.notFound(() => {
     throw notFound("Route");

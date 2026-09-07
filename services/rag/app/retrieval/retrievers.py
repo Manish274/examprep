@@ -12,6 +12,7 @@ from collections.abc import Sequence
 
 from app.core.models import RetrievalStrategy, ScoredChunk
 from app.core.registry import dense_retrievers, sparse_retrievers
+from app.observability.trace import span
 from app.retrieval.bm25 import Bm25Encoder
 from app.retrieval.fusion import ReciprocalRankFusion
 from app.retrieval.qdrant_store import QdrantStore
@@ -119,7 +120,27 @@ class HybridRetriever:
         logger.debug(
             "hybrid: dense=%s sparse=%s", len(dense_results), len(sparse_results)
         )
-        return self._fuser.fuse([dense_results, sparse_results], top_k=top_k)
+        fused = self._fuser.fuse([dense_results, sparse_results], top_k=top_k)
+
+        dense_ids = [r.chunk.id for r in dense_results]
+        sparse_ids = [r.chunk.id for r in sparse_results]
+        async with span("fuse", top_k=top_k) as observed:
+            # Agreement between the two retrievers is the number that explains
+            # a fusion result. When they overlap barely at all, RRF is
+            # interleaving two disagreeing lists rather than reinforcing a
+            # consensus, and the fused ranking is worse than the better half.
+            observed.output(
+                dense=len(dense_ids),
+                sparse=len(sparse_ids),
+                overlap=len(set(dense_ids) & set(sparse_ids)),
+                fused=len(fused),
+                dense_only_in_top=sum(
+                    1
+                    for r in fused[:5]
+                    if r.chunk.id in set(dense_ids) - set(sparse_ids)
+                ),
+            )
+        return fused
 
 
 class RetrievalService:
@@ -181,9 +202,36 @@ class RetrievalService:
         if not wants_rerank:
             return candidates
 
-        return await self.reranker.rerank(  # type: ignore[attr-defined]
-            query, candidates, top_n=top_k
-        )
+        before = {r.chunk.id: position for position, r in enumerate(candidates)}
+        async with span(
+            "rerank", candidates=len(candidates), top_n=top_k
+        ) as observed:
+            reranked = await self.reranker.rerank(  # type: ignore[attr-defined]
+                query, candidates, top_n=top_k
+            )
+            # How far the reranker actually moved things. A reranker that
+            # changes nothing is costing latency for no benefit, and one that
+            # rewrites the order completely is worth a second look -- neither
+            # is visible from the results alone.
+            shifts = [
+                before[r.chunk.id] - position
+                for position, r in enumerate(reranked)
+                if r.chunk.id in before
+            ]
+            observed.output(
+                returned=len(reranked),
+                top_changed=bool(reranked)
+                and bool(candidates)
+                and reranked[0].chunk.id != candidates[0].chunk.id,
+                max_promotion=max(shifts, default=0),
+                mean_abs_shift=(
+                    round(sum(abs(s) for s in shifts) / len(shifts), 2)
+                    if shifts
+                    else 0.0
+                ),
+                dropped=len(candidates) - len(reranked),
+            )
+        return reranked
 
 
 @dense_retrievers.register("qdrant")

@@ -339,3 +339,41 @@ class TestCollectionSchema:
     async def test_ensure_is_idempotent(self, service) -> None:
         _, store, _ = service
         assert await store.ensure_collection() is False
+
+
+class TestGoldSetValidation:
+    """`known_chunk_ids` is what stops a stale gold set reading as a
+    catastrophic regression rather than as a stale file."""
+
+    async def test_recognises_ids_that_are_in_the_index(self, service) -> None:
+        _, store, chunks = service
+        wanted = [c.id for c in chunks[:3]]
+
+        assert await store.known_chunk_ids(wanted, user_id=ALICE) == set(wanted)
+
+    async def test_reports_ids_that_are_gone(self, service) -> None:
+        # Exactly what a gold set looks like after a chunker or vision change:
+        # every id is a well-formed uuid that no longer names anything.
+        _, store, chunks = service
+        stale = str(uuid.uuid4())
+
+        known = await store.known_chunk_ids([chunks[0].id, stale], user_id=ALICE)
+
+        assert known == {chunks[0].id}
+
+    async def test_another_users_chunks_do_not_count_as_known(
+        self, service
+    ) -> None:
+        _, store, chunks = service
+        assert await store.known_chunk_ids([c.id for c in chunks], user_id=BOB) == set()
+
+    async def test_a_malformed_id_is_reported_not_raised(self, service) -> None:
+        # Qdrant rejects a bad point id outright, which would turn a typo in a
+        # gold set into a failed request instead of a named problem.
+        _, store, chunks = service
+
+        known = await store.known_chunk_ids(
+            [chunks[0].id, "not-a-uuid"], user_id=ALICE
+        )
+
+        assert known == {chunks[0].id}

@@ -17,7 +17,8 @@ from fastapi.responses import JSONResponse
 
 from app.api import chat, evaluate, generate, health, ingest, retrieve
 from app.config import get_settings
-from app.container import Container, set_container
+from app.container import Container, get_container, set_container
+from app.observability.middleware import TracingMiddleware
 
 logger = logging.getLogger("rag")
 
@@ -61,6 +62,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     logger.info("rag service stopped")
 
 
+def _active_tracer() -> Any:
+    """The running container's sink, or None before startup has produced one."""
+    try:
+        return get_container().tracer
+    except RuntimeError:
+        return None
+
+
 def create_app() -> FastAPI:
     app = FastAPI(
         title="ExamPrep RAG Service",
@@ -71,6 +80,10 @@ def create_app() -> FastAPI:
         ),
         lifespan=lifespan,
     )
+
+    # Installed before the routers so every traced request is wrapped, and
+    # resolved lazily because the container does not exist yet.
+    app.add_middleware(TracingMiddleware, resolve_tracer=_active_tracer)
 
     app.include_router(health.router)
     app.include_router(ingest.router)

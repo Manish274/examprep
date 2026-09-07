@@ -18,6 +18,7 @@ different id must never be returned.
 from __future__ import annotations
 
 import logging
+import uuid
 from collections.abc import Sequence
 
 from qdrant_client import AsyncQdrantClient, models
@@ -295,6 +296,36 @@ class QdrantStore:
         )
         return [self._to_scored(p, dense_score=True).chunk for p in points]
 
+    async def known_chunk_ids(
+        self, chunk_ids: Sequence[str], *, user_id: str
+    ) -> set[str]:
+        """Which of these ids are actually in the index, for this user.
+
+        Chunk ids are derived from the document id and the content hash, so
+        re-ingesting a document after any change to parsing or chunking gives
+        every chunk a new id. A gold set written before that change then names
+        nothing that exists -- and an evaluation run against it reports
+        Recall@5 of 0.000 for every strategy, which reads as a catastrophic
+        regression rather than as a stale file.
+        """
+        wanted = [c for c in chunk_ids if _is_uuid(c)]
+        if not wanted:
+            return set()
+
+        points = await self._client.retrieve(
+            collection_name=self._collection,
+            ids=list(wanted),
+            with_payload=True,
+            with_vectors=False,
+        )
+        return {
+            str(point.id)
+            for point in points
+            # Scoped by owner, like every other read: existence in another
+            # student's corpus is not existence here.
+            if (point.payload or {}).get("user_id") == user_id
+        }
+
     async def count(self, *, user_id: str | None = None) -> int:
         result = await self._client.count(
             collection_name=self._collection,
@@ -302,3 +333,13 @@ class QdrantStore:
             exact=True,
         )
         return int(result.count)
+
+
+def _is_uuid(value: str) -> bool:
+    """Qdrant rejects a malformed point id outright, which would turn a typo in
+    a gold set into a failed request rather than a reported one."""
+    try:
+        uuid.UUID(value)
+    except (ValueError, AttributeError):
+        return False
+    return True

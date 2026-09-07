@@ -8,6 +8,7 @@ one-off check during tuning and a recorded run later.
 from __future__ import annotations
 
 import logging
+from dataclasses import asdict
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -25,6 +26,8 @@ from app.eval.harness import (
     load_gold_set,
     save_gold_set,
 )
+from app.eval.significance import render
+from app.observability.trace import identify
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +50,10 @@ class EvaluateRequest(BaseModel):
     strategies: list[RetrievalStrategy] | None = None
     top_k: Annotated[int, Field(ge=1, le=100)] = 10
     k_values: list[int] = Field(default_factory=lambda: [1, 3, 5, 10])
+    # Which strategy the others are tested against. Defaults to the one the
+    # pipeline actually ships, so the question asked is "does anything beat
+    # what students are getting today".
+    baseline: str = "hybrid_rerank"
 
 
 class EvaluateResponse(BaseModel):
@@ -55,6 +62,13 @@ class EvaluateResponse(BaseModel):
     config: dict[str, Any]
     strategies: list[dict[str, Any]]
     table: str
+    # A table of means invites reading a 0.02 gap as a result. These say
+    # whether the gaps survive the number of questions behind them.
+    significance: list[dict[str, Any]]
+    significance_table: str
+    # Gold entries naming chunks that are no longer indexed. Reported rather
+    # than silently scored as misses.
+    stale_chunk_ids: list[str] = Field(default_factory=list)
 
 
 def _resolve_gold(request: EvaluateRequest) -> list[GoldQuery]:
@@ -82,12 +96,45 @@ def _resolve_gold(request: EvaluateRequest) -> list[GoldQuery]:
     raise HTTPException(400, "Supply either 'queries' or 'gold_set_path'")
 
 
+async def _stale_ids(
+    container: Any, gold: list[GoldQuery], user_id: str
+) -> set[str]:
+    """Gold chunk ids that are no longer in the index."""
+    wanted = {chunk_id for query in gold for chunk_id in query.relevant_chunk_ids}
+    if not wanted:
+        return set()
+    try:
+        known = await container.store.known_chunk_ids(
+            sorted(wanted), user_id=user_id
+        )
+    except Exception as exc:
+        # A check that cannot run must not block the evaluation it was only
+        # meant to annotate.
+        logger.warning("could not validate the gold set against the index: %s", exc)
+        return set()
+    return wanted - known
+
+
 @router.post("/eval/retrieval", response_model=EvaluateResponse)
 async def evaluate_retrieval(
     request: EvaluateRequest, settings: SettingsDep
 ) -> EvaluateResponse:
     gold = _resolve_gold(request)
     container = get_container()
+    identify(user_id=request.user_id)
+
+    stale = await _stale_ids(container, gold, request.user_id)
+    if stale and len(stale) == len({c for q in gold for c in q.relevant_chunk_ids}):
+        # Every strategy would score 0.000 and the report would read as a
+        # catastrophic regression. It is a stale file, and saying so is worth
+        # far more than four columns of zeroes.
+        raise HTTPException(
+            409,
+            "None of the chunk ids in this gold set are in the index for that "
+            "user. Chunk ids change whenever a document is re-ingested after a "
+            "parsing or chunking change, so this gold set predates the current "
+            "index and must be rebuilt or remapped.",
+        )
 
     report = await EvaluationHarness(container.retrieval).run(
         gold,
@@ -108,7 +155,14 @@ async def evaluate_retrieval(
     )
 
     payload = report.to_dict()
-    return EvaluateResponse(**payload, table=report.to_table())
+    comparisons = report.significance(baseline=request.baseline)
+    return EvaluateResponse(
+        **payload,
+        table=report.to_table(),
+        significance=[asdict(c) for c in comparisons],
+        significance_table=render(comparisons),
+        stale_chunk_ids=sorted(stale),
+    )
 
 
 class GenerateGoldRequest(BaseModel):
