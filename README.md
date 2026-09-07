@@ -151,10 +151,20 @@ loosened to let it. It speaks exactly the protocol the real frontend will.
 Development only -- the route 404s when `NODE_ENV=production`.
 
 ```bash
-docker compose up -d
-cd services/rag && .venv/Scripts/python.exe -m uvicorn app.main:app --port 8000
-npm run dev:api
-npm run dev:worker
+npm run dev
+```
+
+That brings up the containers, the RAG service, the API and the worker together,
+prefixes their output by service, and prints the console URL once it answers.
+Ctrl-C stops all of them. Every part reloads on save.
+
+```
+dev    | postgres, redis and qdrant are up
+rag    | INFO:     Uvicorn running on http://127.0.0.1:8000
+worker | INFO: worker listening
+api    | INFO: api listening
+
+  ▲  Console live at http://localhost:3001/console
 ```
 
 Six tabs, one per stage worth inspecting on its own:

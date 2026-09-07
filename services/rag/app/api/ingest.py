@@ -98,6 +98,9 @@ class IngestResponse(BaseModel):
     indexed: int
     cache_hits: int
     vision: dict[str, int]
+    # Chunks whose text was byte-identical to an earlier one and were dropped.
+    # A high count on a deck usually means repeated title or build-up slides.
+    duplicates_dropped: int
     timings: dict[str, int]
     metadata: dict[str, Any]
     chunks: list[ChunkResponse]
@@ -171,6 +174,7 @@ async def ingest(
         indexed=result.indexed,
         cache_hits=result.cache_hits,
         vision=result.vision,
+        duplicates_dropped=len(result.duplicates),
         timings=result.timings,
         metadata=result.document.metadata,
         chunks=[ChunkResponse.from_chunk(c) for c in result.chunks],
@@ -246,6 +250,7 @@ async def preview(
         "chunker": result.chunker_name,
         "vision": result.vision,
         "chunk_count": len(result.chunks),
+        "duplicates_dropped": len(result.duplicates),
         "timings": result.timings,
         "chunks": [
             {

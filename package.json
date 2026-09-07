@@ -16,6 +16,7 @@
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
     "lint": "npm run lint --workspaces --if-present",
+    "dev": "node scripts/dev.mjs",
     "dev:api": "npm run dev --workspace @examprep/api",
     "dev:worker": "npm run dev --workspace @examprep/worker",
     "db:generate": "npm run db:generate --workspace @examprep/db",

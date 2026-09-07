@@ -83,7 +83,17 @@ export const documentRoutes = new Hono<AppEnv>()
       )
       .limit(1);
 
-    if (duplicate) {
+    if (duplicate && duplicate.status === "failed") {
+      // A failed row must not block the retry. Otherwise a document that hit a
+      // bug -- or a rate limit -- is permanently un-uploadable: "we could not
+      // process this" followed by "you have already uploaded this" is a dead
+      // end with no way out but a database prompt.
+      await db().delete(documents).where(eq(documents.id, duplicate.id));
+      logger.info(
+        { documentId: duplicate.id },
+        "replacing a failed document with a fresh upload",
+      );
+    } else if (duplicate) {
       // Re-uploading the same bytes should return the existing document rather
       // than paying to embed it twice.
       throw conflict(

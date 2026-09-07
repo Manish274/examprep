@@ -63,6 +63,43 @@ def build_chunker(name: str, settings: Settings):
     )
 
 
+def deduplicate(chunks: list[Chunk]) -> tuple[list[Chunk], list[str]]:
+    """Drops chunks whose text is byte-identical to an earlier one.
+
+    Chunk ids are `uuid5(document_id, sha256(text))`, which is what makes them
+    reproducible across re-ingests -- and what makes two identical chunks in one
+    document collide on the primary key, failing the whole upload.
+
+    Lecture decks produce this constantly: a title slide repeated between
+    sections, or an animation built up over five slides where each adds a
+    picture and the extracted text never changes. Those five chunks embed
+    identically and score identically, so all four extra copies can do is crowd
+    real material out of the top K. Keeping the first occurrence is both the fix
+    for the collision and the better index.
+
+    The first is kept rather than the last, so the retained chunk carries the
+    earliest position in the document -- where a reader would meet it.
+    """
+    seen: dict[str, Chunk] = {}
+    kept: list[Chunk] = []
+    dropped: list[str] = []
+
+    for chunk in chunks:
+        first = seen.get(chunk.id)
+        if first is None:
+            seen[chunk.id] = chunk
+            kept.append(chunk)
+            continue
+        # Recorded rather than discarded silently: a document losing a fifth of
+        # its chunks is worth being able to see.
+        dropped.append(
+            f"chunk {chunk.metadata.chunk_index} duplicates "
+            f"{first.metadata.chunk_index}"
+        )
+
+    return kept, dropped
+
+
 class IngestionResult:
     def __init__(
         self,
@@ -73,6 +110,7 @@ class IngestionResult:
         indexed: int = 0,
         cache_hits: int = 0,
         vision: dict[str, int] | None = None,
+        duplicates: list[str] | None = None,
     ) -> None:
         self.document = document
         self.chunks = chunks
@@ -81,6 +119,7 @@ class IngestionResult:
         self.indexed = indexed
         self.cache_hits = cache_hits
         self.vision = vision or {}
+        self.duplicates = duplicates or []
 
 
 async def parse_and_chunk(
@@ -140,8 +179,10 @@ async def parse_and_chunk(
         "chunk", chunker=chunker_name, blocks=len(document.blocks)
     ) as observed:
         chunks = build_chunker(chunker_name, settings).chunk(document)
+        chunks, duplicates = deduplicate(chunks)
         observed.output(
             chunks=len(chunks),
+            duplicates_dropped=len(duplicates),
             tokens=sum(c.token_count for c in chunks),
             median_tokens=(
                 sorted(c.token_count for c in chunks)[len(chunks) // 2]
@@ -150,6 +191,14 @@ async def parse_and_chunk(
             ),
         )
     chunk_ms = int((time.perf_counter() - started) * 1000)
+
+    if duplicates:
+        logger.info(
+            "%s: dropped %s duplicate chunks (%s)",
+            filename,
+            len(duplicates),
+            "; ".join(duplicates[:5]),
+        )
 
     if not chunks:
         raise EmptyDocumentError(
@@ -177,6 +226,7 @@ async def parse_and_chunk(
         chunker_name=chunker_name,
         timings=timings,
         vision=vision_stats,
+        duplicates=duplicates,
     )
 
 

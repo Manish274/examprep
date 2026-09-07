@@ -16,6 +16,9 @@ import pytest
 
 from app.config import Settings, get_settings
 from app.container import build_test_container, set_container
+from app.core.models import Chunk, ChunkMetadata
+from app.core.text import chunk_id_for, content_hash
+from app.ingestion.pipeline import deduplicate
 from app.main import create_app
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -440,3 +443,75 @@ class TestDeterministicChunkIds:
         assert [c["id"] for c in first["chunks"]] == [
             c["id"] for c in second["chunks"]
         ]
+
+
+class TestDuplicateChunks:
+    """A document containing the same text twice must still ingest.
+
+    Chunk ids are uuid5(document_id, sha256(text)), so two byte-identical
+    chunks in one document produce one id -- and the insert dies on the primary
+    key, taking the whole upload with it. Lecture decks trigger this constantly:
+    a title slide repeated between sections, or an animation built up over five
+    slides where each adds a picture and the text never changes.
+    """
+
+    @staticmethod
+    def _chunk(text: str, index: int, slide: int) -> Chunk:
+        return Chunk(
+            id=chunk_id_for("doc-1", text),
+            text=text,
+            token_count=len(text.split()),
+            metadata=ChunkMetadata(
+                document_id="doc-1",
+                document_name="lecture.pptx",
+                chunk_index=index,
+                slide_number=slide,
+                content_hash=content_hash(text),
+            ),
+        )
+
+    def test_keeps_one_copy_of_a_repeated_slide(self) -> None:
+        chunks = [
+            self._chunk("Intro to AI, Paolo Turrini", 0, 5),
+            self._chunk("Intro to AI, Paolo Turrini", 1, 6),
+            self._chunk("Intro to AI, Paolo Turrini", 2, 7),
+            self._chunk("Markov decision processes", 3, 8),
+        ]
+
+        kept, dropped = deduplicate(chunks)
+
+        assert [c.text for c in kept] == [
+            "Intro to AI, Paolo Turrini",
+            "Markov decision processes",
+        ]
+        assert len(dropped) == 2
+        assert len({c.id for c in kept}) == len(kept)
+
+    def test_keeps_the_first_occurrence(self) -> None:
+        # The retained chunk should carry the earliest position in the
+        # document -- where a reader would actually meet it.
+        chunks = [
+            self._chunk("Expected utility of a policy", 37, 44),
+            self._chunk("Expected utility of a policy", 38, 45),
+        ]
+
+        kept, _ = deduplicate(chunks)
+
+        assert kept[0].metadata.chunk_index == 37
+        assert kept[0].metadata.slide_number == 44
+
+    def test_near_duplicates_are_left_alone(self) -> None:
+        # Only byte-identical text is redundant. Two passages that merely
+        # overlap are different material and both must survive.
+        chunks = [
+            self._chunk("A policy maps states to actions", 0, 1),
+            self._chunk("A policy maps states to actions.", 1, 2),
+        ]
+
+        kept, dropped = deduplicate(chunks)
+
+        assert len(kept) == 2
+        assert dropped == []
+
+    def test_an_empty_document_does_not_explode(self) -> None:
+        assert deduplicate([]) == ([], [])

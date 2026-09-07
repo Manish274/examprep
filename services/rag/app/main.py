@@ -30,6 +30,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         level=settings.LOG_LEVEL.upper(),
         format="%(asctime)s %(levelname)-8s %(name)s: %(message)s",
     )
+    # httpcore logs every socket read and header at DEBUG, which at
+    # LOG_LEVEL=debug buries this service's own output several hundred lines
+    # deep. httpx stays as configured -- its one line per request is exactly
+    # what you want when a provider is misbehaving.
+    for noisy in ("httpcore", "hpack", "h11", "urllib3"):
+        logging.getLogger(noisy).setLevel(
+            max(logging.INFO, logging.getLogger().level)
+        )
     logger.info(
         "rag service starting (embedding=%s llm=%s reranker=%s mock=%s)",
         settings.EMBEDDING_PROVIDER,

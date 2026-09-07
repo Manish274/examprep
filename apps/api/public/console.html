@@ -450,13 +450,48 @@ function hue(id) {
   return `hsl(${h} 62% 52%)`;
 }
 
-async function api(path, options = {}) {
+/**
+ * Trades the refresh token for a new access token.
+ *
+ * Access tokens are short-lived, which is right, and a testing session lasts
+ * far longer than one. Without this the console signs itself out mid-experiment
+ * and the failure looks like a broken endpoint.
+ */
+async function refreshAccess() {
+  if (!S.refreshToken) return false;
+  try {
+    const res = await fetch("/api/auth/refresh", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ refreshToken: S.refreshToken }),
+    });
+    if (!res.ok) return false;
+    const tokens = await res.json();
+    S.token = tokens.accessToken;
+    // The server rotates the refresh token on every use, so keeping the old
+    // one would make the next refresh fail.
+    S.refreshToken = tokens.refreshToken;
+    persist();
+    // The socket authenticated with the token that just expired.
+    S.ws?.close();
+    connectSocket();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function api(path, options = {}, retried = false) {
   const headers = { ...(options.headers || {}) };
   if (S.token) headers.authorization = `Bearer ${S.token}`;
   if (options.body && !(options.body instanceof FormData)) {
     headers["content-type"] = "application/json";
   }
   const res = await fetch(path, { ...options, headers });
+
+  if (res.status === 401 && !retried && S.refreshToken) {
+    if (await refreshAccess()) return api(path, options, true);
+  }
   if (res.status === 204) return null;
 
   const text = await res.text();
