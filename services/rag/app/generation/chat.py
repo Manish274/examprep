@@ -36,6 +36,7 @@ from app.core.models import (
     Source,
 )
 from app.generation.context import BuiltContext, verify_citations
+from app.generation.history import prepare as prepare_history
 from app.generation.prompts import (
     NO_CONTEXT_REPLY,
     UNSUPPORTED_REPLY,
@@ -97,10 +98,17 @@ class ChatService:
         llm: object,
         *,
         utility_llm: object | None = None,
+        history_turns: int = 8,
+        history_tokens: int = 1500,
     ) -> None:
         self._retrieval = retrieval
         self._context = context_builder
         self._llm = llm
+        # History has its own budget, kept well below the context budget: the
+        # conversation is the setting for an answer, the sources are its
+        # evidence, and the setting must never evict the evidence.
+        self._history_turns = history_turns
+        self._history_tokens = history_tokens
         # A smaller model for query rewriting: high frequency, low difficulty,
         # and it keeps the main model's quota for answering.
         self._utility_llm = utility_llm or llm
@@ -195,13 +203,33 @@ class ChatService:
     def _messages(
         self, request: ChatRequest, context: BuiltContext
     ) -> list[LLMMessage]:
-        return [
-            LLMMessage(role="system", content=system_prompt(request.mode)),
+        """System prompt, then the conversation, then this question.
+
+        The prior turns go in as real turns rather than flattened into the
+        prompt text: models follow a conversation they are shown as one, and it
+        keeps the sources adjacent to the question they are evidence for.
+
+        The question the model is asked is the one the student actually typed,
+        not the condensed rewrite. The rewrite exists to retrieve well -- it is
+        a search query, and answering it instead would drop the phrasing and
+        emphasis the student chose.
+        """
+        messages = [LLMMessage(role="system", content=system_prompt(request.mode))]
+
+        for turn in prepare_history(
+            [(t.role, t.content) for t in request.history],
+            max_turns=self._history_turns,
+            max_tokens=self._history_tokens,
+        ):
+            messages.append(LLMMessage(role=turn.role, content=turn.content))
+
+        messages.append(
             LLMMessage(
                 role="user",
                 content=user_prompt(request.question, context.text),
-            ),
-        ]
+            )
+        )
+        return messages
 
     def _finish(
         self,

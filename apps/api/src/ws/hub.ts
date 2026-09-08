@@ -1,5 +1,5 @@
 import type { WSContext } from "hono/ws";
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, ne } from "drizzle-orm";
 import {
   chatSessions,
   documentChunks,
@@ -37,7 +37,26 @@ interface Connection {
   /** Cancels the answer currently streaming, if any. */
   abort: AbortController | null;
   authTimer: NodeJS.Timeout | null;
+  /**
+   * Serialises this connection's frames.
+   *
+   * Nothing awaits one `onMessage` before the next fires, so without this a
+   * client that sends its auth frame and its first question together races:
+   * the question is dispatched while the token is still being verified and is
+   * rejected with "send an auth frame first". Two questions in quick
+   * succession are worse -- both generate at once, and the second overwrites
+   * the abort controller of the first, so cancelling stops only one of them
+   * and the other streams on unread.
+   *
+   * Chaining also gives the second question the first one's answer in its
+   * history, which is what a student typing quickly expects.
+   */
+  queue: Promise<void>;
+  pending: number;
 }
+
+/** A client this far ahead of itself is malfunctioning, not impatient. */
+const MAX_PENDING_FRAMES = 16;
 
 const AUTH_TIMEOUT_MS = 10_000;
 
@@ -124,17 +143,38 @@ function ensureSubscriber(): Redis {
   return subscriber;
 }
 
+/**
+ * How many past messages are fetched for context.
+ *
+ * More than the RAG service will actually use: it trims to a turn and token
+ * budget of its own, and that policy belongs in one place -- next to the
+ * prompt it has to fit inside.
+ */
+const HISTORY_MESSAGES = 20;
+
+/**
+ * The most recent turns of a conversation, oldest first.
+ *
+ * Ordering descending and reversing is the point. Ordering ascending with a
+ * limit returns the *first* twenty messages, so once a conversation passed
+ * twenty the context froze at its opening and every later question was
+ * answered as though the intervening exchange had not happened -- the exact
+ * failure this history exists to prevent, and invisible in a short test.
+ *
+ * Empty rows are excluded: an assistant row is written before its answer
+ * streams, so a request in flight would otherwise contribute a blank turn.
+ */
 async function loadHistory(
   sessionId: string,
 ): Promise<{ role: string; content: string }[]> {
   const rows = await db()
     .select({ role: messages.role, content: messages.content })
     .from(messages)
-    .where(eq(messages.sessionId, sessionId))
-    .orderBy(asc(messages.createdAt))
-    .limit(20);
+    .where(and(eq(messages.sessionId, sessionId), ne(messages.content, "")))
+    .orderBy(desc(messages.createdAt))
+    .limit(HISTORY_MESSAGES);
 
-  return rows.map((r) => ({ role: r.role, content: r.content }));
+  return rows.reverse().map((r) => ({ role: r.role, content: r.content }));
 }
 
 /**
@@ -401,6 +441,8 @@ export function createHandlers() {
         watchingGeneration: new Set(),
         abort: null,
         authTimer: null,
+        queue: Promise.resolve(),
+        pending: 0,
       };
       connection.authTimer = setTimeout(() => {
         if (!connection.userId) {
@@ -430,12 +472,26 @@ export function createHandlers() {
         return;
       }
 
-      try {
-        await dispatch(connection, result.data);
-      } catch (err) {
-        logger.error({ err }, "websocket dispatch failed");
-        fail(ws, "internal_error", "Something went wrong");
+      if (connection.pending >= MAX_PENDING_FRAMES) {
+        fail(ws, "too_many_frames", "Too many messages in flight; slow down");
+        return;
       }
+
+      // Queued rather than awaited here: frames must be handled in the order
+      // they arrived, and this handler is re-entered before the previous call
+      // resolves.
+      connection.pending += 1;
+      connection.queue = connection.queue
+        .then(() => dispatch(connection, result.data))
+        .catch((err: unknown) => {
+          logger.error({ err }, "websocket dispatch failed");
+          fail(ws, "internal_error", "Something went wrong");
+        })
+        .finally(() => {
+          connection.pending -= 1;
+        });
+
+      await connection.queue;
     },
 
     onClose(_evt: Event, ws: WSContext): void {

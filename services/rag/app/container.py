@@ -278,6 +278,8 @@ class Container:
             self.context_builder,
             self.llm,
             utility_llm=self.utility_llm,
+            history_turns=settings.CHAT_HISTORY_TURNS,
+            history_tokens=settings.CHAT_HISTORY_MAX_TOKENS,
         )
 
     async def startup(self) -> None:
@@ -343,5 +345,7 @@ def build_test_container(settings: Settings) -> Container:
             container.context_builder,
             container.llm,
             utility_llm=container.utility_llm,
+            history_turns=settings.CHAT_HISTORY_TURNS,
+            history_tokens=settings.CHAT_HISTORY_MAX_TOKENS,
         )
     return container

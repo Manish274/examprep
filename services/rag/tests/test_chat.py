@@ -413,3 +413,118 @@ class TestStrategyIsHonoured:
         )
         await service.answer(_request(strategy=RetrievalStrategy.DENSE))
         assert captured == [RetrievalStrategy.DENSE]
+
+
+class TestConversationMemory:
+    """A follow-up must reach the model with the exchange that preceded it.
+
+    Condensing already made *retrieval* conversation-aware. Until the turns
+    reached the answering model too, the right passages were found and then
+    written up as though the student had asked nothing before -- so "explain
+    that more simply" produced a fresh lecture rather than a simpler version of
+    the answer just given.
+    """
+
+    @staticmethod
+    def _history() -> list[ChatTurn]:
+        return [
+            ChatTurn(role="user", content="what is a bigram"),
+            ChatTurn(role="assistant", content="A bigram is a sequence of two [S1]."),
+        ]
+
+    async def test_prior_turns_reach_the_model(self) -> None:
+        llm = MockLLMProvider(reply="Answer [S1].")
+        service, _ = _service(llm, utility=MockLLMProvider(reply="what is a trigram"))
+
+        await service.answer(
+            _request(question="and a trigram?", history=self._history())
+        )
+
+        sent = llm.calls[0]
+        assert [m.role for m in sent] == ["system", "user", "assistant", "user"]
+        assert sent[1].content == "what is a bigram"
+        assert "A bigram is a sequence of two" in sent[2].content
+
+    async def test_stale_citation_markers_are_stripped_from_prior_answers(
+        self,
+    ) -> None:
+        # [S1] in the earlier answer pointed at whatever was retrieved then.
+        # This question retrieved a different set, so a reused marker would
+        # resolve to an unrelated passage and show the student a wrong source.
+        llm = MockLLMProvider(reply="Answer [S1].")
+        service, _ = _service(llm, utility=MockLLMProvider(reply="rewritten"))
+
+        await service.answer(
+            _request(question="and a trigram?", history=self._history())
+        )
+
+        assistant_turn = llm.calls[0][2]
+        assert "[S1]" not in assistant_turn.content
+
+    async def test_the_question_asked_is_the_one_the_student_typed(self) -> None:
+        # The condensed rewrite is a search query. Answering it instead would
+        # discard the phrasing and emphasis the student chose.
+        llm = MockLLMProvider(reply="Answer [S1].")
+        service, retrieval = _service(
+            llm, utility=MockLLMProvider(reply="what is a trigram in n-gram models")
+        )
+
+        await service.answer(
+            _request(question="and a trigram?", history=self._history())
+        )
+
+        assert retrieval.queries == ["what is a trigram in n-gram models"]
+        assert "and a trigram?" in llm.calls[0][-1].content
+
+    async def test_sources_stay_adjacent_to_the_question(self) -> None:
+        # The material is evidence for the question being asked, not for the
+        # conversation, so it belongs in the final turn.
+        llm = MockLLMProvider(reply="Answer [S1].")
+        service, _ = _service(llm, utility=MockLLMProvider(reply="rewritten"))
+
+        await service.answer(_request(history=self._history()))
+
+        final = llm.calls[0][-1]
+        assert final.role == "user"
+        assert "Study material:" in final.content
+
+    async def test_history_cannot_crowd_out_the_material(self) -> None:
+        # An answer's evidence must survive a long conversation. The history
+        # budget is separate and far smaller than the context budget.
+        llm = MockLLMProvider(reply="Answer [S1].")
+        service, _ = _service(llm, utility=MockLLMProvider(reply="rewritten"))
+        long_history = [
+            ChatTurn(role="user" if i % 2 == 0 else "assistant", content="x" * 4000)
+            for i in range(40)
+        ]
+
+        await service.answer(_request(history=long_history))
+
+        sent = llm.calls[0]
+        assert "Study material:" in sent[-1].content
+        # 8 turns plus the system prompt and the current question.
+        assert len(sent) <= 10
+
+    async def test_a_first_message_sends_no_turns(self) -> None:
+        llm = MockLLMProvider(reply="Answer [S1].")
+        service, _ = _service(llm)
+
+        await service.answer(_request())
+
+        assert [m.role for m in llm.calls[0]] == ["system", "user"]
+
+    async def test_streaming_carries_the_conversation_too(self) -> None:
+        llm = MockLLMProvider(reply="Answer [S1].")
+        service, _ = _service(llm, utility=MockLLMProvider(reply="rewritten"))
+
+        async for _kind, _value in service.stream(
+            _request(question="and a trigram?", history=self._history())
+        ):
+            pass
+
+        assert [m.role for m in llm.calls[0]] == [
+            "system",
+            "user",
+            "assistant",
+            "user",
+        ]

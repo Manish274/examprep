@@ -283,9 +283,42 @@ Three things keep answers honest:
 - **Explanation mode changes style, never grounding.** `simple`, `detailed`
   and `exam` share an identical rule block; only the style section differs.
 
-Follow-ups are condensed against the conversation before retrieval — *"how does
-it differ from a trigram"* becomes *"how does a bigram differ from a trigram"*,
-which is what makes a pronoun searchable at all.
+### Conversation memory
+
+Every message is persisted to `messages`, with the sources an answer actually
+cited in `message_sources`. A follow-up carries the exchange before it, and
+that happens in two distinct places for two distinct reasons:
+
+- **Retrieval** sees a condensed rewrite. *"How does it differ from a
+  trigram"* becomes *"how does a bigram differ from a trigram"* — a pronoun is
+  not searchable, and this is what makes a follow-up retrieve anything at all.
+- **Generation** sees the turns themselves. Condensing alone left the
+  answering model blind to the conversation: it retrieved the right passages
+  and then wrote them up as though nothing had been asked before, so *"explain
+  that more simply"* produced a fresh lecture rather than a simpler version of
+  the answer just given.
+
+Two rules protect grounding while doing it:
+
+- **History is not evidence.** Prior turns say what the student is referring
+  to. Every factual claim in the new answer must still come from the sources
+  retrieved for it, and the prompt says so explicitly.
+- **Stale markers are stripped.** A previous answer's `[S1]` referred to
+  whatever was retrieved *then*. The new question retrieves a different set, so
+  a copied marker would resolve to an unrelated passage and show the student a
+  confidently wrong source. Markers are removed from prior turns before the
+  model sees them.
+
+History has its own budget — `CHAT_HISTORY_TURNS` (8) and
+`CHAT_HISTORY_MAX_TOKENS` (1500) — deliberately a small fraction of
+`CONTEXT_MAX_TOKENS`. The conversation is an answer's setting; the sources are
+its evidence, and the setting must never evict the evidence.
+
+Frames from one socket are handled in order. Nothing awaits one `onMessage`
+before the next fires, so a client that sends its auth frame and first question
+together would otherwise have the question dispatched mid-verification and
+rejected — and two questions in quick succession would generate concurrently,
+with the second overwriting the abort controller of the first.
 
 ---
 

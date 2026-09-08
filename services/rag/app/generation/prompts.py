@@ -36,7 +36,12 @@ Rules, in order of importance:
    model, not taken from the document's text. Use it, but if a claim rests only
    on such a source and the exact wording matters -- a formula, a number, a
    definition -- say that it was read from an image.
-5. Never invent a source marker, a page number, or a quotation."""
+5. Never invent a source marker, a page number, or a quotation.
+6. Earlier turns in this conversation tell you what the student is referring
+   to. They are not evidence. Anything you asserted in an earlier answer must
+   be supported by the sources below before you assert it again, and every
+   citation must point at a source in this message -- markers from earlier
+   answers referred to a different set of passages."""
 
 _MODES: dict[ExplanationMode, str] = {
     ExplanationMode.SIMPLE: """Style: explain it simply.

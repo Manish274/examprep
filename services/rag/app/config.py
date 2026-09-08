@@ -87,6 +87,14 @@ class Settings(BaseSettings):
     CONTEXT_TOP_N: int = 8
     CONTEXT_MAX_TOKENS: int = 5000
 
+    # ── conversation ─────────────────────────────────────────
+    # How much of the conversation the answering model is shown. Deliberately
+    # a small fraction of the context budget: prior turns say what a follow-up
+    # refers to, the sources say what is true, and the first must never crowd
+    # out the second.
+    CHAT_HISTORY_TURNS: int = 8
+    CHAT_HISTORY_MAX_TOKENS: int = 1500
+
     # ── observability ────────────────────────────────────────
     TRACER: str = "postgres"
     LANGFUSE_PUBLIC_KEY: str = ""
