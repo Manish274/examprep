@@ -1,0 +1,11 @@
+:root{
+  --space-1:2px;  --space-2:4px;  --space-3:6px;  --space-4:8px;
+  --space-5:10px; --space-6:12px; --space-7:16px; --space-8:20px;
+  --space-9:24px; --space-10:32px; --space-11:40px; --space-12:56px;
+  --space-13:80px; --space-14:120px;
+
+  --rail-width:256px;      /* left navigation rail */
+  --canvas-max:680px;      /* composer / message column */
+  --reading-max:620px;     /* long-form answer text */
+  --gutter:24px;
+}

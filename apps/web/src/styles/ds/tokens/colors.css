@@ -1,0 +1,69 @@
+:root{
+  /* --- Ink: the near-black surface stack. Examprep is dark-only. --- */
+  --ink-0:#0A0A0B;   /* page canvas */
+  --ink-1:#101012;   /* left rail, footers */
+  --ink-2:#17171A;   /* cards, panels */
+  --ink-3:#1F1F23;   /* raised: composer, inputs, active nav */
+  --ink-4:#2A2A30;   /* hover on raised */
+  --ink-5:#35353D;   /* pressed / selected chip */
+
+  /* --- Paper: text and iconography on ink --- */
+  --paper-0:#F4F4F5; /* primary */
+  --paper-1:#B9B9C0; /* secondary */
+  --paper-2:#85858E; /* tertiary, placeholder */
+  --paper-3:#5C5C64; /* disabled, micro-caps */
+
+  /* --- Hairlines --- */
+  --line-1:rgba(255,255,255,.07);
+  --line-2:rgba(255,255,255,.12);
+  --line-3:rgba(255,255,255,.22);
+
+  /* --- Accent: blue. Retrieval, citations, focus, primary action. --- */
+  --blue-100:#DCE7FD;
+  --blue-300:#9DBAF6;
+  --blue-500:#5B8DEF;
+  --blue-600:#4478DE;
+  --blue-700:#2F5CB0;
+  --blue-tint-08:rgba(91,141,239,.08);
+  --blue-tint-16:rgba(91,141,239,.16);
+  --blue-tint-32:rgba(91,141,239,.32);
+
+  /* --- Semantic hues (used sparingly: quiz results, index health) --- */
+  --green-500:#7FB3A3;
+  --amber-500:#E8C547;
+  --red-500:#E5695B;
+
+  /* --- Semantic aliases: prefer these in components --- */
+  --bg-page:var(--ink-0);
+  --bg-rail:var(--ink-1);
+  --surface-card:var(--ink-2);
+  --surface-raised:var(--ink-3);
+  --surface-hover:var(--ink-4);
+  --surface-pressed:var(--ink-5);
+
+  --text-display:var(--paper-0);
+  --text-body:var(--paper-1);
+  --text-muted:var(--paper-2);
+  --text-faint:var(--paper-3);
+  --text-oncolor:#0A0A0B;
+  --text-link:var(--blue-300);
+  --text-link-hover:var(--blue-100);
+
+  --border-subtle:var(--line-1);
+  --border-default:var(--line-2);
+  --border-strong:var(--line-3);
+
+  --accent:var(--blue-500);
+  --accent-hover:var(--blue-300);
+  --accent-quiet:var(--blue-tint-16);
+  --focus-ring:var(--blue-tint-32);
+
+  --state-correct:var(--green-500);
+  --state-review:var(--amber-500);
+  --state-wrong:var(--red-500);
+
+  /* --- Signature gradient wash: the iridescent smear behind hero type.
+         Low-opacity only, never as a button or card fill. --- */
+  --wash-aurora:radial-gradient(60% 80% at 72% 12%,rgba(91,141,239,.30) 0%,rgba(200,162,200,.14) 38%,rgba(127,179,163,.08) 60%,transparent 78%);
+  --wash-vignette:radial-gradient(120% 90% at 50% 0%,rgba(255,255,255,.05) 0%,transparent 60%);
+}

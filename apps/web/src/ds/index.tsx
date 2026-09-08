@@ -1,0 +1,1283 @@
+"use client";
+
+import {
+  useState,
+  type ButtonHTMLAttributes,
+  type CSSProperties,
+  type HTMLAttributes,
+  type ReactNode,
+  type TextareaHTMLAttributes,
+} from "react";
+import {
+  ArrowUp,
+  FileText,
+  Loader,
+  Mic,
+  Plus,
+  X,
+  type LucideIcon,
+} from "lucide-react";
+
+/**
+ * The Examprep design system, ported from the Claude Design project's
+ * `_ds_bundle.js` to typed React.
+ *
+ * The bundle is plain `React.createElement` calls with inline style objects and
+ * a `window.lucide` CDN dependency, which is right for a design canvas and
+ * wrong for an application: no types, no tree-shaking, and an icon component
+ * that writes `innerHTML` on every render. These are the same components with
+ * the same token references and the same numbers -- variants, sizes, hover
+ * rules and transitions are copied, not reinterpreted.
+ *
+ * Two deliberate substitutions, both flagged in the system's own readme as
+ * stand-ins rather than brand decisions:
+ *
+ * - **Icons** come from `lucide-react` rather than the CDN UMD build. Same set,
+ *   same 1.75px stroke, but typed and bundled.
+ * - **Fonts** are loaded by `next/font` in the root layout rather than by an
+ *   `@import` from fonts.googleapis.com. Same three families, self-hosted, with
+ *   no render-blocking request and no layout shift.
+ *
+ * Inline styles are kept rather than converted to Tailwind classes on purpose:
+ * it keeps each component diffable against the bundle it came from, so a
+ * re-import is a readable comparison instead of a translation exercise.
+ */
+
+// ── Icon ───────────────────────────────────────────────────
+
+export function Icon({
+  as: Glyph,
+  size = 16,
+  strokeWidth = 1.75,
+  style,
+}: {
+  as: LucideIcon;
+  size?: number;
+  strokeWidth?: number;
+  style?: CSSProperties;
+}) {
+  return (
+    <Glyph
+      size={size}
+      strokeWidth={strokeWidth}
+      aria-hidden="true"
+      style={{ flex: "0 0 auto", ...style }}
+    />
+  );
+}
+
+// ── Button ─────────────────────────────────────────────────
+
+type ButtonVariant = "primary" | "paper" | "secondary" | "ghost" | "outline";
+type ButtonSize = "sm" | "md" | "lg";
+
+const BTN_BASE: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  gap: "var(--space-3)",
+  fontFamily: "var(--font-sans)",
+  fontWeight: "var(--weight-medium)",
+  letterSpacing: "var(--track-wide)",
+  border: "1px solid transparent",
+  borderRadius: "var(--radius-pill)",
+  cursor: "pointer",
+  transition:
+    "background var(--dur-fast) var(--ease-standard), color var(--dur-fast) var(--ease-standard), border-color var(--dur-fast) var(--ease-standard), opacity var(--dur-fast) var(--ease-standard)",
+  whiteSpace: "nowrap",
+  textDecoration: "none",
+};
+
+const BTN_SIZES: Record<ButtonSize, CSSProperties> = {
+  sm: { height: 30, padding: "0 14px", fontSize: "var(--text-sm)" },
+  md: { height: 38, padding: "0 20px", fontSize: "var(--text-md)" },
+  lg: { height: 46, padding: "0 28px", fontSize: "var(--text-lg)" },
+};
+
+const BTN_VARIANTS: Record<ButtonVariant, CSSProperties> = {
+  primary: {
+    background: "var(--accent)",
+    color: "#0A0A0B",
+    borderColor: "var(--accent)",
+  },
+  paper: {
+    background: "var(--paper-0)",
+    color: "var(--text-oncolor)",
+    borderColor: "var(--paper-0)",
+  },
+  secondary: {
+    background: "var(--surface-raised)",
+    color: "var(--paper-0)",
+    borderColor: "var(--border-default)",
+  },
+  ghost: {
+    background: "transparent",
+    color: "var(--text-body)",
+    borderColor: "transparent",
+  },
+  outline: {
+    background: "transparent",
+    color: "var(--paper-0)",
+    borderColor: "var(--border-strong)",
+  },
+};
+
+// Filled buttons lighten on hover, never darken, and opacity never signals it.
+const BTN_HOVER: Record<ButtonVariant, CSSProperties> = {
+  primary: { background: "var(--blue-300)", borderColor: "var(--blue-300)" },
+  paper: { background: "#FFFFFF", borderColor: "#FFFFFF" },
+  secondary: { background: "var(--surface-hover)" },
+  ghost: { background: "var(--surface-raised)", color: "var(--paper-0)" },
+  outline: { background: "rgba(255,255,255,.06)" },
+};
+
+export function Button({
+  children,
+  variant = "secondary",
+  size = "md",
+  icon,
+  iconEnd,
+  caps = false,
+  fullWidth = false,
+  disabled = false,
+  style,
+  ...rest
+}: {
+  children?: ReactNode;
+  variant?: ButtonVariant;
+  size?: ButtonSize;
+  icon?: LucideIcon;
+  iconEnd?: LucideIcon;
+  caps?: boolean;
+  fullWidth?: boolean;
+} & ButtonHTMLAttributes<HTMLButtonElement>) {
+  const [hover, setHover] = useState(false);
+  const glyph = size === "lg" ? 17 : 15;
+
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{
+        ...BTN_BASE,
+        ...BTN_SIZES[size],
+        ...BTN_VARIANTS[variant],
+        ...(hover && !disabled ? BTN_HOVER[variant] : null),
+        ...(caps
+          ? {
+              textTransform: "uppercase",
+              fontSize: "var(--caps-size)",
+              letterSpacing: "var(--caps-track)",
+            }
+          : null),
+        ...(disabled ? { opacity: 0.38, cursor: "not-allowed" } : null),
+        ...(fullWidth ? { width: "100%" } : null),
+        ...style,
+      }}
+      {...rest}
+    >
+      {icon ? <Icon as={icon} size={glyph} /> : null}
+      {children}
+      {iconEnd ? <Icon as={iconEnd} size={glyph} /> : null}
+    </button>
+  );
+}
+
+// ── IconButton ─────────────────────────────────────────────
+
+export function IconButton({
+  icon,
+  size = 32,
+  active = false,
+  disabled = false,
+  label,
+  style,
+  ...rest
+}: {
+  icon: LucideIcon;
+  size?: number;
+  active?: boolean;
+  label: string;
+} & ButtonHTMLAttributes<HTMLButtonElement>) {
+  const [hover, setHover] = useState(false);
+  const lifted = active || (hover && !disabled);
+
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      disabled={disabled}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{
+        width: size,
+        height: size,
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        borderRadius: "var(--radius-md)",
+        border: "1px solid transparent",
+        cursor: disabled ? "not-allowed" : "pointer",
+        background: lifted ? "var(--surface-raised)" : "transparent",
+        color: lifted ? "var(--paper-0)" : "var(--text-muted)",
+        opacity: disabled ? 0.38 : 1,
+        transition:
+          "background var(--dur-fast) var(--ease-standard), color var(--dur-fast) var(--ease-standard)",
+        ...style,
+      }}
+      {...rest}
+    >
+      <Icon as={icon} size={Math.round(size * 0.53)} />
+    </button>
+  );
+}
+
+// ── Badge ──────────────────────────────────────────────────
+
+type BadgeTone = "neutral" | "accent" | "correct" | "review" | "wrong";
+
+const BADGE_TONES: Record<BadgeTone, CSSProperties> = {
+  neutral: {
+    background: "var(--surface-raised)",
+    color: "var(--text-body)",
+    borderColor: "var(--border-default)",
+  },
+  accent: {
+    background: "var(--accent-quiet)",
+    color: "var(--blue-300)",
+    borderColor: "var(--blue-tint-32)",
+  },
+  correct: {
+    background: "rgba(127,179,163,.14)",
+    color: "var(--state-correct)",
+    borderColor: "rgba(127,179,163,.32)",
+  },
+  review: {
+    background: "rgba(232,197,71,.14)",
+    color: "var(--state-review)",
+    borderColor: "rgba(232,197,71,.32)",
+  },
+  wrong: {
+    background: "rgba(229,105,91,.14)",
+    color: "var(--state-wrong)",
+    borderColor: "rgba(229,105,91,.32)",
+  },
+};
+
+export function Badge({
+  children,
+  tone = "neutral",
+  caps = true,
+  style,
+  ...rest
+}: {
+  children: ReactNode;
+  tone?: BadgeTone;
+  caps?: boolean;
+} & HTMLAttributes<HTMLSpanElement>) {
+  return (
+    <span
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: "var(--space-2)",
+        height: 20,
+        padding: "0 8px",
+        borderRadius: "var(--radius-xs)",
+        border: "1px solid",
+        fontFamily: "var(--font-sans)",
+        fontSize: caps ? "var(--caps-size)" : "var(--text-xs)",
+        fontWeight: "var(--weight-medium)",
+        letterSpacing: caps ? "var(--caps-track)" : "var(--track-wide)",
+        textTransform: caps ? "uppercase" : "none",
+        ...BADGE_TONES[tone],
+        ...style,
+      }}
+      {...rest}
+    >
+      {children}
+    </span>
+  );
+}
+
+// ── Card ───────────────────────────────────────────────────
+
+/** Flat near-black fill, one hairline, 14px radius, no drop shadow. */
+export function Card({
+  children,
+  padding = "var(--space-9)",
+  wash = false,
+  raised = false,
+  interactive = false,
+  style,
+  ...rest
+}: {
+  children: ReactNode;
+  padding?: string;
+  wash?: boolean;
+  raised?: boolean;
+  interactive?: boolean;
+} & HTMLAttributes<HTMLDivElement>) {
+  const [hover, setHover] = useState(false);
+
+  return (
+    <div
+      onMouseEnter={() => interactive && setHover(true)}
+      onMouseLeave={() => interactive && setHover(false)}
+      style={{
+        position: "relative",
+        overflow: "hidden",
+        padding,
+        background: raised ? "var(--surface-raised)" : "var(--surface-card)",
+        border: `1px solid ${hover ? "var(--border-default)" : "var(--border-subtle)"}`,
+        borderRadius: "var(--radius-card)",
+        transition:
+          "border-color var(--dur-base) var(--ease-standard), background var(--dur-base) var(--ease-standard)",
+        cursor: interactive ? "pointer" : "default",
+        ...style,
+      }}
+      {...rest}
+    >
+      {wash ? (
+        <div
+          aria-hidden="true"
+          style={{
+            position: "absolute",
+            inset: 0,
+            background: "var(--wash-aurora)",
+            pointerEvents: "none",
+          }}
+        />
+      ) : null}
+      <div style={{ position: "relative" }}>{children}</div>
+    </div>
+  );
+}
+
+// ── Display ────────────────────────────────────────────────
+
+type DisplaySize = "xl" | "lg" | "md" | "sm";
+
+const DISPLAY_SIZES: Record<DisplaySize, { serif: string; lh: string }> = {
+  xl: { serif: "var(--display-xl)", lh: "var(--display-xl-lh)" },
+  lg: { serif: "var(--display-lg)", lh: "var(--display-lg-lh)" },
+  md: { serif: "var(--display-md)", lh: "var(--display-md-lh)" },
+  sm: { serif: "var(--display-sm)", lh: "var(--display-sm-lh)" },
+};
+
+/**
+ * The headline lockup: an italic serif line completed by a sans line.
+ *
+ * The break is rhetorical, not a wrap -- "study what you" / "actually forgot".
+ * The serif is never set upright and never used alone at display sizes.
+ */
+export function Display({
+  serif,
+  sans,
+  size = "lg",
+  align = "left",
+  as: Tag = "h2",
+  style,
+  ...rest
+}: {
+  serif: ReactNode;
+  sans?: ReactNode;
+  size?: DisplaySize;
+  align?: CSSProperties["textAlign"];
+  as?: "h1" | "h2" | "h3";
+} & HTMLAttributes<HTMLHeadingElement>) {
+  const s = DISPLAY_SIZES[size];
+
+  return (
+    <Tag
+      style={{
+        margin: 0,
+        textAlign: align,
+        fontSize: s.serif,
+        lineHeight: s.lh,
+        letterSpacing: "var(--track-tight)",
+        ...style,
+      }}
+      {...rest}
+    >
+      <span
+        style={{
+          display: "block",
+          fontFamily: "var(--font-display)",
+          fontStyle: "italic",
+          fontWeight: 400,
+          color: "var(--text-display)",
+        }}
+      >
+        {serif}
+      </span>
+      {sans ? (
+        <span
+          style={{
+            display: "block",
+            fontFamily: "var(--font-sans)",
+            fontWeight: "var(--weight-light)",
+            color: "var(--paper-0)",
+            fontSize: "0.82em",
+          }}
+        >
+          {sans}
+        </span>
+      ) : null}
+    </Tag>
+  );
+}
+
+// ── SegmentedControl ───────────────────────────────────────
+
+export interface SegmentOption<T extends string> {
+  value: T;
+  label: string;
+  icon?: LucideIcon;
+}
+
+/** The mode switch. Pill track, filled thumb, no travel animation. */
+export function SegmentedControl<T extends string>({
+  options,
+  value,
+  onChange,
+  size = "md",
+  style,
+}: {
+  options: readonly SegmentOption<T>[];
+  value: T;
+  onChange: (value: T) => void;
+  size?: "sm" | "md";
+  style?: CSSProperties;
+}) {
+  const height = size === "sm" ? 26 : 32;
+
+  return (
+    <div
+      role="tablist"
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 2,
+        padding: 3,
+        background: "var(--surface-raised)",
+        border: "1px solid var(--border-subtle)",
+        borderRadius: "var(--radius-pill)",
+        ...style,
+      }}
+    >
+      {options.map((option) => {
+        const on = option.value === value;
+        return (
+          <button
+            key={option.value}
+            role="tab"
+            aria-selected={on}
+            type="button"
+            onClick={() => onChange(option.value)}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "var(--space-3)",
+              height,
+              padding: "0 14px",
+              border: "none",
+              borderRadius: "var(--radius-pill)",
+              cursor: "pointer",
+              background: on ? "var(--surface-pressed)" : "transparent",
+              color: on ? "var(--paper-0)" : "var(--text-muted)",
+              fontFamily: "var(--font-sans)",
+              fontSize: size === "sm" ? "var(--text-sm)" : "var(--text-md)",
+              fontWeight: on ? "var(--weight-medium)" : "var(--weight-regular)",
+              transition:
+                "background var(--dur-fast) var(--ease-standard), color var(--dur-fast) var(--ease-standard)",
+            }}
+          >
+            {option.icon ? <Icon as={option.icon} size={14} /> : null}
+            {option.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── Composer ───────────────────────────────────────────────
+
+/**
+ * The primary input, and the only way material enters the product.
+ *
+ * Raised panel, 20px radius, textarea over a footer row: attach on the left,
+ * the mode switch beside it, send on the right. There is no separate library
+ * page by design -- the `+` is the whole upload story.
+ */
+export function Composer<T extends string>({
+  value,
+  onChange,
+  onSubmit,
+  onAttach,
+  placeholder = "Ask anything about your notes",
+  mode,
+  onModeChange,
+  modes,
+  attachments,
+  footerRight,
+  body,
+  hideSend = false,
+  disabled = false,
+  autoFocus = false,
+  style,
+  ...rest
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  onSubmit: () => void;
+  onAttach: () => void;
+  placeholder?: string;
+  mode: T;
+  onModeChange: (mode: T) => void;
+  modes: readonly SegmentOption<T>[];
+  attachments?: ReactNode;
+  footerRight?: ReactNode;
+  disabled?: boolean;
+  autoFocus?: boolean;
+  /**
+   * Replaces the text field.
+   *
+   * Quiz and Cards do not take a written prompt -- the backend generates from
+   * an indexed document, not from a sentence -- so they put their own controls
+   * here rather than showing a box whose contents would be quietly ignored.
+   * The panel, the attach button and the mode switch stay identical.
+   */
+  body?: ReactNode;
+  /** Overrides the send affordance when `body` supplies its own action. */
+  hideSend?: boolean;
+} & Omit<TextareaHTMLAttributes<HTMLDivElement>, "onChange" | "onSubmit">) {
+  const [focus, setFocus] = useState(false);
+  const canSend = value.trim().length > 0 && !disabled;
+
+  return (
+    <div
+      style={{
+        background: "var(--surface-raised)",
+        border: `1px solid ${focus ? "var(--border-default)" : "var(--border-subtle)"}`,
+        borderRadius: "var(--radius-2xl)",
+        padding: "var(--space-7)",
+        // The composer is one of only two things that genuinely float.
+        boxShadow: focus ? "var(--shadow-md)" : "none",
+        transition:
+          "border-color var(--dur-base) var(--ease-standard), box-shadow var(--dur-base) var(--ease-standard)",
+        ...style,
+      }}
+      {...rest}
+    >
+      {attachments ? (
+        <div
+          style={{
+            display: "flex",
+            flexWrap: "wrap",
+            gap: "var(--space-4)",
+            marginBottom: "var(--space-6)",
+          }}
+        >
+          {attachments}
+        </div>
+      ) : null}
+
+      {body ?? (
+      <textarea
+        value={value}
+        autoFocus={autoFocus}
+        placeholder={placeholder}
+        rows={1}
+        onChange={(event) => onChange(event.target.value)}
+        onFocus={() => setFocus(true)}
+        onBlur={() => setFocus(false)}
+        onKeyDown={(event) => {
+          // Enter sends, shift+enter breaks the line.
+          if (event.key === "Enter" && !event.shiftKey) {
+            event.preventDefault();
+            if (canSend) onSubmit();
+          }
+        }}
+        style={{
+          display: "block",
+          width: "100%",
+          minHeight: 26,
+          maxHeight: 160,
+          resize: "none",
+          background: "transparent",
+          border: "none",
+          outline: "none",
+          color: "var(--paper-0)",
+          fontFamily: "var(--font-sans)",
+          fontSize: "var(--text-lg)",
+          lineHeight: "var(--text-lg-lh)",
+          padding: "2px 2px 14px",
+        }}
+      />
+      )}
+
+      <div style={{ display: "flex", alignItems: "center", gap: "var(--space-6)" }}>
+        <IconButton icon={Plus} label="Attach notes" onClick={onAttach} size={30} />
+        <SegmentedControl
+          options={modes}
+          value={mode}
+          onChange={onModeChange}
+          size="sm"
+        />
+        <span style={{ flex: 1 }} />
+        {footerRight}
+        {hideSend ? null : (
+          <IconButton
+            icon={canSend ? ArrowUp : Mic}
+            label={canSend ? "Send" : "Dictate"}
+            onClick={() => canSend && onSubmit()}
+            disabled={!canSend}
+            size={30}
+            style={
+              canSend ? { background: "var(--accent)", color: "#0A0A0B" } : undefined
+            }
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── SuggestionChip ─────────────────────────────────────────
+
+export function SuggestionChip({
+  icon,
+  children,
+  active = false,
+  onClick,
+  style,
+}: {
+  icon?: LucideIcon;
+  children: ReactNode;
+  active?: boolean;
+  onClick?: () => void;
+  style?: CSSProperties;
+}) {
+  const [hover, setHover] = useState(false);
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: "var(--space-4)",
+        height: 32,
+        padding: "0 14px",
+        background: active
+          ? "var(--surface-pressed)"
+          : hover
+            ? "var(--surface-hover)"
+            : "var(--surface-raised)",
+        border: `1px solid ${active ? "var(--border-default)" : "var(--border-subtle)"}`,
+        borderRadius: "var(--radius-md)",
+        cursor: "pointer",
+        color: hover || active ? "var(--paper-0)" : "var(--text-body)",
+        fontFamily: "var(--font-sans)",
+        fontSize: "var(--text-md)",
+        transition:
+          "background var(--dur-fast) var(--ease-standard), color var(--dur-fast) var(--ease-standard), border-color var(--dur-fast) var(--ease-standard)",
+        ...style,
+      }}
+    >
+      {icon ? <Icon as={icon} size={14} style={{ color: "var(--text-muted)" }} /> : null}
+      {children}
+    </button>
+  );
+}
+
+// ── AttachmentTile ─────────────────────────────────────────
+
+/** An uploaded document in the composer. Indexing shows a number, not a spinner. */
+export function AttachmentTile({
+  name,
+  meta,
+  progress = 100,
+  failed = false,
+  onRemove,
+}: {
+  name: string;
+  meta?: string;
+  progress?: number;
+  failed?: boolean;
+  onRemove?: () => void;
+}) {
+  const indexing = progress < 100 && !failed;
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: "var(--space-5)",
+        height: 38,
+        padding: "0 8px 0 10px",
+        background: "var(--ink-2)",
+        border: `1px solid ${failed ? "rgba(229,105,91,.32)" : "var(--border-subtle)"}`,
+        borderRadius: "var(--radius-md)",
+        maxWidth: 260,
+      }}
+    >
+      <Icon
+        as={indexing ? Loader : FileText}
+        size={15}
+        style={{
+          color: failed
+            ? "var(--state-wrong)"
+            : indexing
+              ? "var(--accent)"
+              : "var(--text-muted)",
+        }}
+      />
+      <span style={{ flex: 1, minWidth: 0 }}>
+        <span
+          style={{
+            display: "block",
+            fontSize: "var(--text-sm)",
+            color: "var(--paper-0)",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {name}
+        </span>
+        <span
+          style={{
+            display: "block",
+            fontFamily: "var(--font-mono)",
+            fontSize: 10,
+            color: failed ? "var(--state-wrong)" : "var(--text-faint)",
+          }}
+        >
+          {failed ? "failed" : indexing ? `indexing ${progress}%` : (meta ?? "")}
+        </span>
+      </span>
+      {onRemove ? (
+        <button
+          type="button"
+          onClick={onRemove}
+          aria-label={`Remove ${name}`}
+          style={{
+            display: "inline-flex",
+            background: "transparent",
+            border: "none",
+            cursor: "pointer",
+            color: "var(--text-muted)",
+            padding: 4,
+          }}
+        >
+          <Icon as={X} size={13} />
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+// ── CitationChip ───────────────────────────────────────────
+
+/** Inline retrieval marker inside answer text. Click opens the source. */
+export function CitationChip({
+  index,
+  source,
+  onClick,
+}: {
+  index: string | number;
+  source?: string;
+  onClick?: () => void;
+}) {
+  const [hover, setHover] = useState(false);
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={source}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        minWidth: 17,
+        height: 17,
+        padding: "0 4px",
+        marginLeft: 3,
+        verticalAlign: "1px",
+        background: hover ? "var(--blue-tint-32)" : "var(--accent-quiet)",
+        border: "1px solid var(--blue-tint-32)",
+        borderRadius: "var(--radius-xs)",
+        cursor: "pointer",
+        color: hover ? "var(--blue-100)" : "var(--blue-300)",
+        fontFamily: "var(--font-mono)",
+        fontSize: 10,
+        lineHeight: 1,
+        transition:
+          "background var(--dur-fast) var(--ease-standard), color var(--dur-fast) var(--ease-standard)",
+      }}
+    >
+      {index}
+    </button>
+  );
+}
+
+// ── Message ────────────────────────────────────────────────
+
+/**
+ * Student turns sit in a raised bubble on the right; answers are unboxed
+ * reading text on the canvas.
+ */
+export function Message({
+  role = "assistant",
+  children,
+  footer,
+}: {
+  role?: "user" | "assistant";
+  children: ReactNode;
+  footer?: ReactNode;
+}) {
+  const isUser = role === "user";
+
+  return (
+    <div style={{ display: "flex", justifyContent: isUser ? "flex-end" : "flex-start" }}>
+      <div
+        style={{
+          maxWidth: isUser ? "78%" : "100%",
+          padding: isUser ? "var(--space-6) var(--space-7)" : 0,
+          background: isUser ? "var(--surface-raised)" : "transparent",
+          border: isUser ? "1px solid var(--border-subtle)" : "none",
+          borderRadius: isUser ? "var(--radius-xl)" : 0,
+          color: isUser ? "var(--paper-0)" : "var(--text-body)",
+          fontSize: isUser ? "var(--text-md)" : "var(--text-lg)",
+          lineHeight: isUser ? "var(--text-md-lh)" : 1.68,
+        }}
+      >
+        {children}
+        {footer ? <div style={{ marginTop: "var(--space-7)" }}>{footer}</div> : null}
+      </div>
+    </div>
+  );
+}
+
+// ── NavItem / RailSection ──────────────────────────────────
+
+export function NavItem({
+  icon,
+  children,
+  active = false,
+  badge,
+  dot = false,
+  muted = false,
+  onClick,
+  title,
+}: {
+  icon?: LucideIcon;
+  children: ReactNode;
+  active?: boolean;
+  badge?: string;
+  dot?: boolean;
+  muted?: boolean;
+  onClick?: () => void;
+  title?: string;
+}) {
+  const [hover, setHover] = useState(false);
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={title}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: "var(--space-6)",
+        width: "100%",
+        height: 32,
+        padding: "0 10px",
+        border: "1px solid transparent",
+        borderRadius: "var(--radius-md)",
+        cursor: "pointer",
+        background: active
+          ? "var(--surface-raised)"
+          : hover
+            ? "rgba(255,255,255,.04)"
+            : "transparent",
+        color: active
+          ? "var(--paper-0)"
+          : muted
+            ? "var(--text-muted)"
+            : "var(--text-body)",
+        fontFamily: "var(--font-sans)",
+        fontSize: "var(--text-md)",
+        fontWeight: active ? "var(--weight-medium)" : "var(--weight-regular)",
+        textAlign: "left",
+        transition:
+          "background var(--dur-fast) var(--ease-standard), color var(--dur-fast) var(--ease-standard)",
+      }}
+    >
+      {dot ? (
+        <span
+          style={{
+            width: 5,
+            height: 5,
+            borderRadius: "var(--radius-pill)",
+            border: "1px solid var(--line-3)",
+            flex: "0 0 auto",
+            marginLeft: 4,
+            marginRight: 3,
+          }}
+        />
+      ) : null}
+      {icon ? (
+        <Icon
+          as={icon}
+          size={15}
+          style={{ color: active ? "var(--paper-0)" : "var(--text-muted)" }}
+        />
+      ) : null}
+      <span
+        style={{
+          flex: 1,
+          minWidth: 0,
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+        }}
+      >
+        {children}
+      </span>
+      {badge ? (
+        <span
+          style={{
+            fontSize: "var(--caps-size)",
+            letterSpacing: "var(--caps-track)",
+            textTransform: "uppercase",
+            color: "var(--text-faint)",
+            border: "1px solid var(--border-default)",
+            borderRadius: "var(--radius-xs)",
+            padding: "1px 5px",
+          }}
+        >
+          {badge}
+        </span>
+      ) : null}
+    </button>
+  );
+}
+
+/** A titled group in the rail. Title is micro-caps; optional trailing action. */
+export function RailSection({
+  title,
+  action,
+  actionLabel,
+  onAction,
+  children,
+  style,
+}: {
+  title?: string;
+  action?: LucideIcon;
+  actionLabel?: string;
+  onAction?: () => void;
+  children: ReactNode;
+  style?: CSSProperties;
+}) {
+  return (
+    <div
+      style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)", ...style }}
+    >
+      {title ? (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            padding: "0 10px",
+            height: 28,
+          }}
+        >
+          <span
+            style={{
+              fontSize: "var(--caps-size)",
+              fontWeight: "var(--weight-medium)",
+              letterSpacing: "var(--caps-track)",
+              textTransform: "uppercase",
+              color: "var(--text-faint)",
+            }}
+          >
+            {title}
+          </span>
+          {action ? (
+            <button
+              type="button"
+              onClick={onAction}
+              aria-label={actionLabel ?? title}
+              style={{
+                display: "inline-flex",
+                background: "transparent",
+                border: "none",
+                cursor: "pointer",
+                color: "var(--text-muted)",
+                padding: 2,
+              }}
+            >
+              <Icon as={action} size={14} />
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+      {children}
+    </div>
+  );
+}
+
+// ── QuizOption ─────────────────────────────────────────────
+
+type QuizState = "idle" | "selected" | "correct" | "wrong";
+
+export function QuizOption({
+  letter,
+  children,
+  state = "idle",
+  onClick,
+  disabled = false,
+}: {
+  letter: string;
+  children: ReactNode;
+  state?: QuizState;
+  onClick?: () => void;
+  disabled?: boolean;
+}) {
+  const [hover, setHover] = useState(false);
+
+  const tone = {
+    idle: {
+      border: hover && !disabled ? "var(--border-default)" : "var(--border-subtle)",
+      bg: hover && !disabled ? "var(--surface-card)" : "transparent",
+      key: "var(--text-muted)",
+      text: "var(--text-body)",
+    },
+    selected: {
+      border: "var(--blue-tint-32)",
+      bg: "var(--blue-tint-08)",
+      key: "var(--blue-300)",
+      text: "var(--paper-0)",
+    },
+    correct: {
+      border: "rgba(127,179,163,.4)",
+      bg: "rgba(127,179,163,.1)",
+      key: "var(--state-correct)",
+      text: "var(--paper-0)",
+    },
+    wrong: {
+      border: "rgba(229,105,91,.4)",
+      bg: "rgba(229,105,91,.1)",
+      key: "var(--state-wrong)",
+      text: "var(--paper-1)",
+    },
+  }[state];
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: "var(--space-7)",
+        width: "100%",
+        padding: "var(--space-6) var(--space-7)",
+        background: tone.bg,
+        border: `1px solid ${tone.border}`,
+        borderRadius: "var(--radius-lg)",
+        cursor: disabled ? "default" : "pointer",
+        color: tone.text,
+        fontFamily: "var(--font-sans)",
+        fontSize: "var(--text-lg)",
+        textAlign: "left",
+        transition:
+          "background var(--dur-fast) var(--ease-standard), border-color var(--dur-fast) var(--ease-standard)",
+      }}
+    >
+      <span
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
+          width: 24,
+          height: 24,
+          flex: "0 0 auto",
+          borderRadius: "var(--radius-pill)",
+          border: `1px solid ${tone.border}`,
+          fontFamily: "var(--font-mono)",
+          fontSize: 11,
+          color: tone.key,
+        }}
+      >
+        {letter}
+      </span>
+      <span style={{ flex: 1, minWidth: 0 }}>{children}</span>
+    </button>
+  );
+}
+
+// ── Flashcard ──────────────────────────────────────────────
+
+/** Click to flip. Question in the italic display serif, answer in sans. */
+export function Flashcard({
+  question,
+  answer,
+  source,
+  flipped,
+  onFlip,
+}: {
+  question: string;
+  answer: string;
+  source?: string;
+  flipped?: boolean;
+  onFlip?: (next: boolean) => void;
+}) {
+  const [self, setSelf] = useState(false);
+  const isFlipped = flipped !== undefined ? flipped : self;
+
+  const flip = () => {
+    if (onFlip) onFlip(!isFlipped);
+    else setSelf(!isFlipped);
+  };
+
+  return (
+    <div
+      onClick={flip}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          flip();
+        }
+      }}
+      role="button"
+      tabIndex={0}
+      aria-pressed={isFlipped}
+      style={{
+        position: "relative",
+        display: "flex",
+        flexDirection: "column",
+        justifyContent: "center",
+        minHeight: 240,
+        padding: "var(--space-11)",
+        cursor: "pointer",
+        overflow: "hidden",
+        background: "var(--surface-card)",
+        border: "1px solid var(--border-subtle)",
+        borderRadius: "var(--radius-card)",
+        transition: "border-color var(--dur-base) var(--ease-standard)",
+      }}
+    >
+      <div
+        aria-hidden="true"
+        style={{
+          position: "absolute",
+          inset: 0,
+          background: "var(--wash-vignette)",
+          pointerEvents: "none",
+        }}
+      />
+      <span
+        style={{
+          position: "absolute",
+          top: "var(--space-7)",
+          left: "var(--space-11)",
+          fontSize: "var(--caps-size)",
+          letterSpacing: "var(--caps-track)",
+          textTransform: "uppercase",
+          color: "var(--text-faint)",
+        }}
+      >
+        {isFlipped ? "Answer" : "Question"}
+      </span>
+
+      {isFlipped ? (
+        <p
+          style={{
+            margin: 0,
+            position: "relative",
+            fontSize: "var(--text-lg)",
+            lineHeight: 1.62,
+            color: "var(--text-body)",
+          }}
+        >
+          {answer}
+        </p>
+      ) : (
+        <p
+          style={{
+            margin: 0,
+            position: "relative",
+            fontFamily: "var(--font-display)",
+            fontStyle: "italic",
+            fontSize: "var(--display-md)",
+            lineHeight: "var(--display-md-lh)",
+            letterSpacing: "var(--track-tight)",
+            color: "var(--text-display)",
+          }}
+        >
+          {question}
+        </p>
+      )}
+
+      {source ? (
+        <span
+          style={{
+            position: "absolute",
+            bottom: "var(--space-7)",
+            left: "var(--space-11)",
+            fontFamily: "var(--font-mono)",
+            fontSize: 10,
+            color: "var(--text-faint)",
+          }}
+        >
+          {source}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+// ── Wordmark ───────────────────────────────────────────────
+
+/**
+ * No logo file was supplied with the design system, so the mark is type: the
+ * micro-caps lockup with the middot in accent.
+ */
+export function Wordmark({ tone = "primary" }: { tone?: "primary" | "muted" }) {
+  return (
+    <span
+      style={{
+        fontSize: 11,
+        fontWeight: 500,
+        letterSpacing: "var(--caps-track)",
+        textTransform: "uppercase",
+        color: tone === "primary" ? "var(--paper-0)" : "var(--paper-1)",
+        whiteSpace: "nowrap",
+      }}
+    >
+      Examprep <span style={{ color: "var(--accent)" }}>&#9679;</span> Study
+    </span>
+  );
+}

@@ -4,9 +4,8 @@ import {
   createContext,
   useCallback,
   useContext,
-  useEffect,
   useMemo,
-  useState,
+  useSyncExternalStore,
   type ReactNode,
 } from "react";
 import {
@@ -41,17 +40,20 @@ interface AuthValue {
 const AuthContext = createContext<AuthValue | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [session, setLocal] = useState<Session | null>(null);
-  const [loaded, setLoaded] = useState(false);
-
-  useEffect(() => {
-    // Read after mount, not during render: localStorage does not exist on the
-    // server, and reading it during render makes the markup differ between
-    // server and client.
-    setLocal(getSession());
-    setLoaded(true);
-    return onSessionChange(setLocal);
-  }, []);
+  // `useSyncExternalStore` rather than an effect that copies the store into
+  // state: the session genuinely is an external store, read by the HTTP client
+  // outside React and mutated by a token refresh deep inside a failed request.
+  // The server snapshot is null because localStorage does not exist there, and
+  // returning it separately is what keeps the server markup and the first
+  // client render identical.
+  const session = useSyncExternalStore(onSessionChange, getSession, () => null);
+  // Server renders false, client renders true, with no effect and no second
+  // state variable to keep in step.
+  const loaded = useSyncExternalStore(
+    onSessionChange,
+    () => true,
+    () => false,
+  );
 
   const signIn = useCallback(async (email: string, password: string) => {
     setSession(await loginRequest(email, password));

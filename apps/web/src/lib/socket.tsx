@@ -52,6 +52,10 @@ export function SocketProvider({ children }: { children: ReactNode }) {
   const backlog = useRef<ClientEvent[]>([]);
   const [ready, setReady] = useState(false);
 
+  // `connect` schedules itself on close. Held in a ref so the retry reaches the
+  // current function rather than closing over a half-initialised binding.
+  const reconnect = useRef<() => void>(() => undefined);
+
   const connect = useCallback(() => {
     const session = getSession();
     if (!session?.accessToken || closing.current) return;
@@ -92,7 +96,7 @@ export function SocketProvider({ children }: { children: ReactNode }) {
 
       const delay = RETRY_MS[Math.min(attempt.current, RETRY_MS.length - 1)]!;
       attempt.current += 1;
-      timer.current = setTimeout(connect, delay);
+      timer.current = setTimeout(() => reconnect.current(), delay);
     });
 
     // 'error' is always followed by 'close', which owns the retry. Handling it
@@ -101,6 +105,7 @@ export function SocketProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
+    reconnect.current = connect;
     closing.current = false;
     connect();
 
@@ -158,11 +163,16 @@ export function useSocket(): SocketValue {
 export function useSocketEvent(listener: Listener): void {
   const { subscribe } = useSocket();
   const latest = useRef(listener);
-  latest.current = listener;
+
+  // Assigned in an effect, not during render: a ref written while rendering is
+  // torn by concurrent rendering, and React flags it for exactly that reason.
+  useEffect(() => {
+    latest.current = listener;
+  });
 
   useEffect(
-    // Wrapped in a ref so a listener defined inline does not resubscribe on
-    // every render, which would tear down and rebuild the set constantly.
+    // The subscription reads through the ref so a listener defined inline does
+    // not resubscribe on every render, tearing down and rebuilding the set.
     () => subscribe((event) => latest.current(event)),
     [subscribe],
   );

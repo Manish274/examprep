@@ -1,0 +1,44 @@
+:root{
+  /* Font families are supplied by next/font in layout.tsx, which sets
+     --font-display, --font-sans and --font-mono on <html>. The design system
+     ships these as a Google Fonts @import; self-hosting them through Next is
+     the same three families without the render-blocking request. */
+
+  /* Display — the italic serif voice. Always paired with a sans second line. */
+  --display-xl:64px;
+  --display-xl-lh:1.02;
+  --display-lg:44px;
+  --display-lg-lh:1.06;
+  --display-md:34px;
+  --display-md-lh:1.10;
+  --display-sm:26px;
+  --display-sm-lh:1.14;
+
+  /* UI sans */
+  --text-2xl:22px;
+  --text-2xl-lh:1.30;
+  --text-xl:18px;
+  --text-xl-lh:1.40;
+  --text-lg:16px;
+  --text-lg-lh:1.50;
+  --text-md:14px;
+  --text-md-lh:1.55;
+  --text-sm:13px;
+  --text-sm-lh:1.50;
+  --text-xs:12px;
+  --text-xs-lh:1.45;
+
+  /* Micro-caps — the wide-tracked label from the reference site */
+  --caps-size:10px;
+  --caps-track:.18em;
+  --caps-weight:500;
+
+  --weight-light:300;
+  --weight-regular:400;
+  --weight-medium:500;
+  --weight-semibold:600;
+
+  --track-tight:-.02em;
+  --track-normal:0;
+  --track-wide:.04em;
+}
