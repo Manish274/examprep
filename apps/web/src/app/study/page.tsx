@@ -2,29 +2,36 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Lightbulb, Sparkles, Target } from "lucide-react";
+import { Lightbulb, PanelLeft, Sparkles, Target } from "lucide-react";
 import {
   AttachmentTile,
   Composer,
   Display,
+  IconButton,
   SuggestionChip,
 } from "@/ds";
 import { Rail } from "@/components/rail";
 import { ChatThread } from "@/components/chat-thread";
 import { QuizPanel } from "@/components/quiz-panel";
 import { CardsPanel } from "@/components/cards-panel";
-import { MODE_PLACEHOLDER, STUDY_MODES, type StudyMode } from "@/components/modes";
+import { MODE_PLACEHOLDER, type StudyMode } from "@/components/modes";
 import { useAuth } from "@/lib/auth";
 import { useChat, type ChatMode } from "@/hooks/use-chat";
 import { useDocuments, describeDocument } from "@/hooks/use-documents";
 import { useStudy } from "@/hooks/use-study";
 
 /**
- * The study workspace: fixed rail, one centred column, one composer.
+ * The study workspace: a collapsible rail and one centred column.
  *
- * Layout follows the design system's rules exactly -- 256px rail, a 680px
- * canvas column, 24px gutter, content centred while the canvas is empty and
- * left-aligned once there is a conversation to read.
+ * The canvas has two states, and the composer moves between them. With nothing
+ * to read it sits directly under the greeting as one centred unit with the
+ * starter chips; once there is a conversation it docks at the bottom and the
+ * content scrolls above it. That is the design system's own rule -- centred in
+ * the empty state, left-aligned once a conversation exists -- applied to the
+ * input as well as the text.
+ *
+ * Mode switching lives in the rail only. The composer is a text field and an
+ * attach button, and nothing else.
  */
 
 const STARTERS = [
@@ -43,6 +50,7 @@ export default function StudyPage() {
   const router = useRouter();
   const { session, loaded, signOut } = useAuth();
 
+  const [railOpen, setRailOpen] = useState(true);
   const [mode, setMode] = useState<StudyMode>("chat");
   const [draft, setDraft] = useState("");
   const [explanation] = useState<ChatMode>("detailed");
@@ -72,7 +80,14 @@ export default function StudyPage() {
     [session],
   );
 
-  const empty = mode === "chat" && chat.turns.length === 0;
+  // Whether this mode has anything to show yet. Drives the whole layout.
+  const empty =
+    mode === "chat"
+      ? chat.turns.length === 0
+      : mode === "quiz"
+        ? study.quiz.status === "idle"
+        : study.cards.status === "idle";
+
   const firstReady = docs.ready[0]?.id;
 
   if (!loaded || !session) return null;
@@ -91,9 +106,89 @@ export default function StudyPage() {
     void chat.ask(text, explanation, firstReady);
   }
 
+  const composer = (
+    <Composer
+      value={draft}
+      onChange={setDraft}
+      onSubmit={onSubmit}
+      onAttach={() => fileInput.current?.click()}
+      placeholder={MODE_PLACEHOLDER[mode]}
+      disabled={chat.streaming}
+      hideSend={mode !== "chat"}
+      attachments={
+        docs.documents.length > 0 ? (
+          <>
+            {docs.documents.slice(0, 4).map((document) => (
+              <AttachmentTile
+                key={document.id}
+                name={document.filename}
+                meta={describeDocument(document)}
+                progress={document.status === "ready" ? 100 : (document.progress ?? 0)}
+                failed={document.status === "failed"}
+                onRemove={() => void docs.remove(document.id)}
+              />
+            ))}
+          </>
+        ) : null
+      }
+      body={
+        mode === "chat" ? undefined : (
+          <StudySetup
+            mode={mode}
+            documents={docs.ready}
+            busy={
+              mode === "quiz"
+                ? study.quiz.status === "generating"
+                : study.cards.status === "generating"
+            }
+            onGenerate={(documentId, count, difficulty) =>
+              mode === "quiz"
+                ? void study.generateQuiz(documentId, count, difficulty)
+                : void study.generateCards(documentId, count)
+            }
+          />
+        )
+      }
+    />
+  );
+
+  const hints = (
+    <>
+      {docs.documents.length === 0 && !docs.loading ? (
+        <p
+          style={{
+            margin: "var(--space-6) 0 0",
+            textAlign: "center",
+            fontSize: "var(--text-sm)",
+            color: "var(--text-muted)",
+          }}
+        >
+          Nothing uploaded yet. Use the{" "}
+          <span style={{ color: "var(--paper-0)" }}>+</span> to add a PDF or slide
+          deck — answers only ever come from your own material.
+        </p>
+      ) : null}
+
+      {docs.error ? (
+        <p
+          style={{
+            margin: "var(--space-5) 0 0",
+            textAlign: "center",
+            fontSize: "var(--text-sm)",
+            color: "var(--state-wrong)",
+          }}
+        >
+          {docs.error}
+        </p>
+      ) : null}
+    </>
+  );
+
   return (
     <div style={{ display: "flex", minHeight: "100svh", background: "var(--bg-page)" }}>
       <Rail
+        open={railOpen}
+        onToggle={() => setRailOpen((was) => !was)}
         mode={mode}
         onModeChange={setMode}
         sessions={chat.sessions}
@@ -131,7 +226,26 @@ export default function StudyPage() {
           style={{ display: "none" }}
         />
 
-        {/* The window bar: absolute, top-right of the canvas. */}
+        {/* The only way back once the rail is closed. */}
+        {!railOpen ? (
+          <div
+            style={{
+              position: "absolute",
+              top: 0,
+              left: 0,
+              zIndex: 4,
+              padding: "16px var(--space-7)",
+            }}
+          >
+            <IconButton
+              icon={PanelLeft}
+              label="Show sidebar"
+              size={30}
+              onClick={() => setRailOpen(true)}
+            />
+          </div>
+        ) : null}
+
         <div
           style={{
             position: "absolute",
@@ -141,7 +255,7 @@ export default function StudyPage() {
             display: "flex",
             alignItems: "center",
             gap: "var(--space-5)",
-            padding: "18px var(--gutter)",
+            padding: "22px var(--gutter)",
           }}
         >
           <span
@@ -155,176 +269,138 @@ export default function StudyPage() {
           </span>
         </div>
 
-        <div
-          className="ep-scroll"
-          style={{
-            flex: 1,
-            overflowY: "auto",
-            display: "flex",
-            flexDirection: "column",
-            justifyContent: empty ? "center" : "flex-start",
-            padding: `${empty ? "0" : "72px"} var(--gutter) var(--space-8)`,
-          }}
-        >
+        {empty ? (
+          /* One centred unit: greeting, composer, chips. */
           <div
             style={{
-              width: "100%",
-              maxWidth: "var(--canvas-max)",
-              margin: "0 auto",
+              flex: 1,
               display: "flex",
               flexDirection: "column",
-              gap: "var(--space-9)",
+              justifyContent: "center",
+              alignItems: "center",
+              padding: "var(--space-13) var(--gutter) var(--space-11)",
             }}
           >
-            {empty ? (
-              <div className="ep-rise" style={{ textAlign: "center" }}>
-                <Display
-                  as="h1"
-                  size="md"
-                  align="center"
-                  suppressHydrationWarning
-                  serif={`${salutation}, ${name}`}
-                  sans="what are we studying?"
+            <div
+              className="ep-rise"
+              style={{
+                width: "100%",
+                maxWidth: "var(--canvas-max)",
+                display: "flex",
+                flexDirection: "column",
+                gap: "var(--space-9)",
+              }}
+            >
+              <Display
+                as="h1"
+                size="md"
+                align="center"
+                suppressHydrationWarning
+                serif={`${salutation}, ${name}`}
+                sans="what are we studying?"
+              />
+
+              {composer}
+
+              {mode === "chat" ? (
+                <div
+                  style={{
+                    display: "flex",
+                    flexWrap: "wrap",
+                    justifyContent: "center",
+                    gap: "var(--space-4)",
+                  }}
+                >
+                  {STARTERS.map((starter) => (
+                    <SuggestionChip
+                      key={starter.text}
+                      icon={starter.icon}
+                      onClick={() => setDraft(starter.text)}
+                    >
+                      {starter.text}
+                    </SuggestionChip>
+                  ))}
+                </div>
+              ) : null}
+
+              {mode === "quiz" ? (
+                <QuizPanel
+                  state={study.quiz}
+                  onAnswer={study.answer}
+                  onSubmit={study.submit}
+                  onReset={study.resetQuiz}
                 />
-              </div>
-            ) : null}
+              ) : null}
 
-            {mode === "chat" ? (
-              <ChatThread
-                turns={chat.turns}
-                streaming={chat.streaming}
-                error={chat.error}
-              />
-            ) : null}
+              {mode === "cards" ? (
+                <CardsPanel state={study.cards} onReset={study.resetCards} />
+              ) : null}
 
-            {mode === "quiz" ? (
-              <QuizPanel
-                state={study.quiz}
-                onAnswer={study.answer}
-                onSubmit={study.submit}
-                onReset={study.resetQuiz}
-              />
-            ) : null}
-
-            {mode === "cards" ? (
-              <CardsPanel state={study.cards} onReset={study.resetCards} />
-            ) : null}
-
-            <div ref={bottom} />
+              {hints}
+            </div>
           </div>
-        </div>
-
-        {/* ── composer dock ─────────────────────────────── */}
-        <div
-          style={{
-            position: "sticky",
-            bottom: 0,
-            padding: `0 var(--gutter) var(--space-8)`,
-            background:
-              "linear-gradient(to top, var(--bg-page) 62%, transparent)",
-          }}
-        >
-          <div style={{ width: "100%", maxWidth: "var(--canvas-max)", margin: "0 auto" }}>
-            <Composer
-              value={draft}
-              onChange={setDraft}
-              onSubmit={onSubmit}
-              onAttach={() => fileInput.current?.click()}
-              placeholder={MODE_PLACEHOLDER[mode]}
-              mode={mode}
-              onModeChange={setMode}
-              modes={STUDY_MODES}
-              disabled={chat.streaming}
-              hideSend={mode !== "chat"}
-              attachments={
-                docs.documents.length > 0 ? (
-                  <>
-                    {docs.documents.slice(0, 4).map((document) => (
-                      <AttachmentTile
-                        key={document.id}
-                        name={document.filename}
-                        meta={describeDocument(document)}
-                        progress={
-                          document.status === "ready" ? 100 : (document.progress ?? 0)
-                        }
-                        failed={document.status === "failed"}
-                        onRemove={() => void docs.remove(document.id)}
-                      />
-                    ))}
-                  </>
-                ) : null
-              }
-              body={
-                mode === "chat" ? undefined : (
-                  <StudySetup
-                    mode={mode}
-                    documents={docs.ready}
-                    busy={
-                      mode === "quiz"
-                        ? study.quiz.status === "generating"
-                        : study.cards.status === "generating"
-                    }
-                    onGenerate={(documentId, count, difficulty) =>
-                      mode === "quiz"
-                        ? void study.generateQuiz(documentId, count, difficulty)
-                        : void study.generateCards(documentId, count)
-                    }
-                  />
-                )
-              }
-            />
-
-            {empty ? (
+        ) : (
+          <>
+            <div
+              className="ep-scroll"
+              style={{
+                flex: 1,
+                overflowY: "auto",
+                padding: "72px var(--gutter) var(--space-8)",
+              }}
+            >
               <div
                 style={{
+                  width: "100%",
+                  maxWidth: "var(--canvas-max)",
+                  margin: "0 auto",
                   display: "flex",
-                  flexWrap: "wrap",
-                  justifyContent: "center",
-                  gap: "var(--space-4)",
-                  marginTop: "var(--space-7)",
+                  flexDirection: "column",
+                  gap: "var(--space-9)",
                 }}
               >
-                {STARTERS.map((starter) => (
-                  <SuggestionChip
-                    key={starter.text}
-                    icon={starter.icon}
-                    onClick={() => setDraft(starter.text)}
-                  >
-                    {starter.text}
-                  </SuggestionChip>
-                ))}
+                {mode === "chat" ? (
+                  <ChatThread
+                    turns={chat.turns}
+                    streaming={chat.streaming}
+                    error={chat.error}
+                  />
+                ) : null}
+
+                {mode === "quiz" ? (
+                  <QuizPanel
+                    state={study.quiz}
+                    onAnswer={study.answer}
+                    onSubmit={study.submit}
+                    onReset={study.resetQuiz}
+                  />
+                ) : null}
+
+                {mode === "cards" ? (
+                  <CardsPanel state={study.cards} onReset={study.resetCards} />
+                ) : null}
+
+                <div ref={bottom} />
               </div>
-            ) : null}
+            </div>
 
-            {docs.documents.length === 0 && !docs.loading ? (
-              <p
-                style={{
-                  margin: "var(--space-6) 0 0",
-                  textAlign: "center",
-                  fontSize: "var(--text-sm)",
-                  color: "var(--text-muted)",
-                }}
+            <div
+              style={{
+                position: "sticky",
+                bottom: 0,
+                padding: "0 var(--gutter) var(--space-8)",
+                background: "linear-gradient(to top, var(--bg-page) 62%, transparent)",
+              }}
+            >
+              <div
+                style={{ width: "100%", maxWidth: "var(--canvas-max)", margin: "0 auto" }}
               >
-                Nothing uploaded yet. Use the{" "}
-                <span style={{ color: "var(--paper-0)" }}>+</span> to add a PDF or
-                slide deck — answers only ever come from your own material.
-              </p>
-            ) : null}
-
-            {docs.error ? (
-              <p
-                style={{
-                  margin: "var(--space-5) 0 0",
-                  textAlign: "center",
-                  fontSize: "var(--text-sm)",
-                  color: "var(--state-wrong)",
-                }}
-              >
-                {docs.error}
-              </p>
-            ) : null}
-          </div>
-        </div>
+                {composer}
+                {hints}
+              </div>
+            </div>
+          </>
+        )}
       </main>
     </div>
   );
@@ -364,7 +440,13 @@ function StudySetup({
 
   if (documents.length === 0) {
     return (
-      <p style={{ margin: "2px 2px 14px", fontSize: "var(--text-md)", color: "var(--text-muted)" }}>
+      <p
+        style={{
+          margin: "2px 2px 14px",
+          fontSize: "var(--text-md)",
+          color: "var(--text-muted)",
+        }}
+      >
         Add a document with the + first — {mode === "quiz" ? "questions" : "cards"}{" "}
         are generated from your own material, so there is nothing to work from yet.
       </p>

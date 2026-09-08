@@ -44,7 +44,10 @@ export function useChat() {
   const refreshSessions = useCallback(async () => {
     try {
       const { sessions: rows } = await listSessions();
-      setSessions(rows);
+      // Only conversations that were actually started. The API names a session
+      // from its opening question, so an untitled row is one that was created
+      // and then abandoned -- a rail full of "New chat" entries nobody wrote.
+      setSessions(rows.filter((row) => row.title));
       return rows;
     } catch {
       return [];
@@ -107,7 +110,10 @@ export function useChat() {
           const { session } = await createSession(documentId);
           id = session.id;
           setSessionId(id);
-          setSessions((rows) => [session, ...rows]);
+          // Not added to the list here: it has no title until the question is
+          // persisted, and an untitled row is exactly what the rail filters
+          // out. `chat:start` refreshes it a moment later, named.
+
         } catch (err) {
           setError(err instanceof Error ? err.message : "Could not start a chat");
           return;
@@ -146,6 +152,8 @@ export function useChat() {
     switch (event.type) {
       case "chat:start": {
         streamingId.current = event.messageId;
+        // The question has been persisted by now, so the session has its name.
+        void refreshSessions();
         setTurns((rows) => [
           ...rows,
           {

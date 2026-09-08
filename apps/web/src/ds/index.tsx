@@ -12,7 +12,6 @@ import {
   ArrowUp,
   FileText,
   Loader,
-  Mic,
   Plus,
   X,
   type LucideIcon,
@@ -537,9 +536,16 @@ export function Composer<T extends string>({
   onSubmit: () => void;
   onAttach: () => void;
   placeholder?: string;
-  mode: T;
-  onModeChange: (mode: T) => void;
-  modes: readonly SegmentOption<T>[];
+  /**
+   * The mode switch is optional.
+   *
+   * Examprep puts it in the rail instead, so the composer stays a text field
+   * and an attach button and nothing else. Omit `modes` and the control is not
+   * rendered at all.
+   */
+  mode?: T;
+  onModeChange?: (mode: T) => void;
+  modes?: readonly SegmentOption<T>[];
   attachments?: ReactNode;
   footerRight?: ReactNode;
   disabled?: boolean;
@@ -623,26 +629,28 @@ export function Composer<T extends string>({
 
       <div style={{ display: "flex", alignItems: "center", gap: "var(--space-6)" }}>
         <IconButton icon={Plus} label="Attach notes" onClick={onAttach} size={30} />
-        <SegmentedControl
-          options={modes}
-          value={mode}
-          onChange={onModeChange}
-          size="sm"
-        />
+        {modes && mode && onModeChange ? (
+          <SegmentedControl
+            options={modes}
+            value={mode}
+            onChange={onModeChange}
+            size="sm"
+          />
+        ) : null}
         <span style={{ flex: 1 }} />
         {footerRight}
-        {hideSend ? null : (
+        {/* Send appears only once there is something to send. The bundle showed
+            a microphone in its place, but nothing behind it dictates -- an
+            affordance that does nothing is worse than an empty corner. */}
+        {!hideSend && canSend ? (
           <IconButton
-            icon={canSend ? ArrowUp : Mic}
-            label={canSend ? "Send" : "Dictate"}
-            onClick={() => canSend && onSubmit()}
-            disabled={!canSend}
+            icon={ArrowUp}
+            label="Send"
+            onClick={onSubmit}
             size={30}
-            style={
-              canSend ? { background: "var(--accent)", color: "#0A0A0B" } : undefined
-            }
+            style={{ background: "var(--accent)", color: "#0A0A0B" }}
           />
-        )}
+        ) : null}
       </div>
     </div>
   );
