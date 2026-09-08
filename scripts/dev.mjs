@@ -22,8 +22,14 @@ import { fileURLToPath } from "node:url";
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const API_PORT = process.env.API_PORT || "3001";
 const RAG_PORT = process.env.RAG_SERVICE_PORT || "8000";
+const WEB_PORT = process.env.WEB_PORT || "3000";
 
-const COLOURS = { rag: "\x1b[35m", api: "\x1b[36m", worker: "\x1b[33m" };
+const COLOURS = {
+  rag: "\x1b[35m",
+  api: "\x1b[36m",
+  worker: "\x1b[33m",
+  web: "\x1b[32m",
+};
 const DIM = "\x1b[2m";
 const RESET = "\x1b[0m";
 
@@ -168,15 +174,34 @@ start(
 );
 start("api", process.execPath, [TSX, "watch", "src/index.ts"], join(ROOT, "apps", "api"));
 start("worker", process.execPath, [TSX, "watch", "src/index.ts"], join(ROOT, "apps", "worker"));
+// Next ships its own CLI entry point, spawned through this node binary for the
+// same reason as tsx: no .cmd shim, no shell, no path split at the space.
+start(
+  "web",
+  process.execPath,
+  [
+    join(ROOT, "node_modules", "next", "dist", "bin", "next"),
+    "dev",
+    "--port",
+    WEB_PORT,
+  ],
+  join(ROOT, "apps", "web"),
+);
 
 for (const signal of ["SIGINT", "SIGTERM"]) {
   process.on(signal, () => shutdown(0));
 }
 
-const url = `http://localhost:${API_PORT}/console`;
-if (await waitFor(url, "the console")) {
+const appUrl = `http://localhost:${WEB_PORT}`;
+const consoleUrl = `http://localhost:${API_PORT}/console`;
+
+// The console answers as soon as the API binds; Next still has a first compile
+// to get through, so it gets a longer grace period and the last word.
+await waitFor(consoleUrl, "the console");
+if (await waitFor(appUrl, "the web app", 180)) {
   process.stdout.write(
-    `\n  \x1b[32m▲\x1b[0m  Console live at \x1b[4m${url}\x1b[0m\n` +
+    `\n  \x1b[32m▲\x1b[0m  ExamPrep at \x1b[4m${appUrl}\x1b[0m\n` +
+      `     ${DIM}dev console  ${consoleUrl}${RESET}\n` +
       `     ${DIM}rag :${RAG_PORT}   api :${API_PORT}   ctrl-c stops everything${RESET}\n\n`,
   );
 }

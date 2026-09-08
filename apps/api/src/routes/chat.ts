@@ -3,6 +3,7 @@ import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import {
   chatSessions,
+  documentChunks,
   documents,
   messageSources,
   messages,
@@ -110,10 +111,32 @@ export const chatRoutes = new Hono<AppEnv>()
 
     // Citations are fetched in one query and grouped, rather than one query
     // per message, which would be a round trip per turn on every page load.
+    //
+    // Joined out to the chunk and its document on purpose. The stored row is
+    // only a marker and a chunk id, so returning it raw would render a
+    // reloaded conversation with bare "[S1]" markers and nothing to say what
+    // they point at -- while the same answer, live over the WebSocket, shows
+    // the document, page and heading. A citation that survives a refresh is
+    // the whole reason they are persisted.
     const sources = rows.length
       ? await db()
-          .select()
+          .select({
+            messageId: messageSources.messageId,
+            marker: messageSources.marker,
+            chunkId: messageSources.chunkId,
+            documentId: documentChunks.documentId,
+            documentName: documents.filename,
+            pageNumber: documentChunks.pageNumber,
+            slideNumber: documentChunks.slideNumber,
+            headingPath: documentChunks.headingPath,
+            snippet: documentChunks.text,
+          })
           .from(messageSources)
+          .innerJoin(
+            documentChunks,
+            eq(documentChunks.id, messageSources.chunkId),
+          )
+          .innerJoin(documents, eq(documents.id, documentChunks.documentId))
           .where(
             inArray(
               messageSources.messageId,
@@ -131,7 +154,15 @@ export const chatRoutes = new Hono<AppEnv>()
     }
 
     return c.json({
-      messages: rows.map((m) => ({ ...m, sources: byMessage.get(m.id) ?? [] })),
+      messages: rows.map((m) => ({
+        ...m,
+        sources: (byMessage.get(m.id) ?? []).map((source) => ({
+          ...source,
+          // Trimmed here rather than in the browser: a citation needs enough
+          // to recognise the passage, not the whole chunk on every message.
+          snippet: source.snippet.slice(0, 320),
+        })),
+      })),
     });
   })
 

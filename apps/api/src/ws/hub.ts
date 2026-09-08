@@ -214,6 +214,21 @@ async function persistSources(
   }
 }
 
+/**
+ * A sidebar label from the opening question.
+ *
+ * Cut on a word boundary: "How do I handle words that never appea…" reads as
+ * a title, "How do I handle words that never appea" reads as a bug.
+ */
+export function deriveTitle(question: string, maxLength = 60): string {
+  const cleaned = question.replace(/\s+/g, " ").trim();
+  if (cleaned.length <= maxLength) return cleaned || "New chat";
+
+  const cut = cleaned.slice(0, maxLength);
+  const lastSpace = cut.lastIndexOf(" ");
+  return `${(lastSpace > maxLength * 0.6 ? cut.slice(0, lastSpace) : cut).trimEnd()}…`;
+}
+
 async function handleChat(
   connection: Connection,
   event: Extract<ClientEvent, { type: "chat:send" }>,
@@ -222,7 +237,11 @@ async function handleChat(
   if (!userId) return;
 
   const [session] = await db()
-    .select({ id: chatSessions.id, documentId: chatSessions.documentId })
+    .select({
+      id: chatSessions.id,
+      documentId: chatSessions.documentId,
+      title: chatSessions.title,
+    })
     .from(chatSessions)
     .where(
       and(
@@ -247,6 +266,17 @@ async function handleChat(
     content: event.content,
     mode: event.mode,
   });
+
+  if (!session.title) {
+    // Named from the question that opened it. A model could write a better
+    // title, but every generation call comes out of a small daily quota that
+    // the answers themselves need -- and an untitled row in the sidebar is a
+    // worse outcome than a plainly truncated one.
+    await db()
+      .update(chatSessions)
+      .set({ title: deriveTitle(event.content) })
+      .where(eq(chatSessions.id, session.id));
+  }
 
   const [assistant] = await db()
     .insert(messages)
