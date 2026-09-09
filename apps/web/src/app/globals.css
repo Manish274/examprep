@@ -33,3 +33,9 @@
 /* The landing nav collapses below 860px, as the source design specified. */
 .ep-landing-nav { display: none; }
 @media (min-width: 860px) { .ep-landing-nav { display: flex; } }
+
+/* The one looping animation in the product: the indeterminate progress ring.
+   Stopped entirely by the reduced-motion block above, which leaves a static
+   arc rather than nothing. */
+@keyframes epSpin { to { transform: rotate(360deg); } }
+.ep-spin { animation: epSpin 1.1s linear infinite; transform-origin: 50% 50%; }

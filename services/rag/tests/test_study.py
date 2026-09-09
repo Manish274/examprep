@@ -275,12 +275,74 @@ class TestExamGeneration:
                 ]
             ]
         )
-        result = await ExamGenerator(llm).generate([_chunk(0)], question_count=1)
+        # Asked for explicitly. True/false is not in the generator's default
+        # set, and since the requested types became a filter rather than a
+        # suggestion, one that arrives unasked-for is discarded.
+        result = await ExamGenerator(llm).generate(
+            [_chunk(0)], question_count=1, types=[QuestionType.TRUE_FALSE]
+        )
         assert result.questions[0].correct_answer == "true"
 
     async def test_empty_material_produces_nothing(self) -> None:
         result = await ExamGenerator(ScriptedLLM([[]])).generate([], question_count=5)
         assert result.questions == []
+
+
+class TestQuestionTypeRestriction:
+    """The requested types are enforced, not merely asked for.
+
+    A written question that reaches a student who was promised multiple choice
+    cannot be displayed by the quiz screen, and would cost a grading model call
+    the caller deliberately avoided by asking for objective questions only.
+    """
+
+    @staticmethod
+    def _mixed() -> ScriptedLLM:
+        return ScriptedLLM(
+            [
+                [
+                    {
+                        "type": "short_answer",
+                        "prompt": "Explain write ahead logging.",
+                        "correct_answer": "The log is written first.",
+                        "explanation": "The passage says so.",
+                        "source": "C1",
+                    },
+                    {
+                        "type": "mcq",
+                        "prompt": "What does WAL write first?",
+                        "options": ["The log", "The page", "The index", "Nothing"],
+                        "correct_answer": "The log",
+                        "explanation": "The passage says so.",
+                        "source": "C1",
+                    },
+                ]
+            ]
+        )
+
+    async def test_multiple_choice_only_drops_a_written_question(self) -> None:
+        result = await ExamGenerator(self._mixed()).generate(
+            [_chunk(i) for i in range(2)],
+            question_count=2,
+            types=[QuestionType.MCQ],
+        )
+
+        assert [q.type for q in result.questions] == [QuestionType.MCQ]
+        # Counted rather than silently dropped, so a run that keeps losing half
+        # its output is visible in the stats.
+        assert result.discarded == 1
+
+    async def test_both_survive_when_both_were_asked_for(self) -> None:
+        result = await ExamGenerator(self._mixed()).generate(
+            [_chunk(i) for i in range(2)],
+            question_count=2,
+            types=[QuestionType.MCQ, QuestionType.SHORT_ANSWER],
+        )
+
+        assert {q.type for q in result.questions} == {
+            QuestionType.MCQ,
+            QuestionType.SHORT_ANSWER,
+        }
 
 
 class TestFlashcardGeneration:

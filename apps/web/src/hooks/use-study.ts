@@ -93,6 +93,11 @@ export function useStudy() {
           documentId,
           questionCount,
           difficulty,
+          // Multiple choice only. Written answers need a model to grade them,
+          // which costs a call out of a small daily quota and returns a
+          // judgement rather than a fact; a four-option question is graded
+          // exactly and instantly.
+          types: ["mcq"],
         });
         quizId.current = testId;
         setQuiz((state) => ({ ...state, testId, title }));

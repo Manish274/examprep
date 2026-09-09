@@ -142,7 +142,11 @@ def _normalise_mcq(item: dict) -> tuple[list[str], str] | None:
     return None
 
 
-def _to_question(item: dict, chunk: Chunk) -> GeneratedQuestion | None:
+def _to_question(
+    item: dict,
+    chunk: Chunk,
+    allowed: Sequence[QuestionType] | None = None,
+) -> GeneratedQuestion | None:
     prompt = str(item.get("prompt", "")).strip()
     explanation = str(item.get("explanation", "")).strip()
     if not prompt or not explanation:
@@ -152,6 +156,13 @@ def _to_question(item: dict, chunk: Chunk) -> GeneratedQuestion | None:
     if raw_type not in {t.value for t in QuestionType}:
         return None
     question_type = QuestionType(raw_type)
+
+    # The prompt asks for particular types; this enforces them. A model that
+    # returns a written question when only multiple choice was requested would
+    # otherwise reach a student who cannot be shown one -- and, on the grading
+    # side, would cost a model call the caller had deliberately avoided.
+    if allowed is not None and question_type not in allowed:
+        return None
 
     if question_type is QuestionType.MCQ:
         normalised = _normalise_mcq(item)
@@ -253,7 +264,7 @@ class ExamGenerator:
                     result.discarded += 1
                     continue
 
-                question = _to_question(item, chunk)
+                question = _to_question(item, chunk, allowed=wanted)
                 if question is None:
                     result.discarded += 1
                     continue

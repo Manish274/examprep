@@ -1072,12 +1072,17 @@ export function QuizOption({
 }) {
   const [hover, setHover] = useState(false);
 
+  const lit = hover && !disabled;
+
   const tone = {
     idle: {
-      border: hover && !disabled ? "var(--border-default)" : "var(--border-subtle)",
-      bg: hover && !disabled ? "var(--surface-card)" : "transparent",
-      key: "var(--text-muted)",
-      text: "var(--text-body)",
+      // Hover lifts the row onto the accent rather than merely a rung up the
+      // ink ladder: an answer is a thing you are about to choose, and the
+      // design system reserves blue for exactly that -- the one live action.
+      border: lit ? "var(--blue-tint-32)" : "var(--border-subtle)",
+      bg: lit ? "var(--blue-tint-08)" : "transparent",
+      key: lit ? "var(--blue-300)" : "var(--text-muted)",
+      text: lit ? "var(--paper-0)" : "var(--text-body)",
     },
     selected: {
       border: "var(--blue-tint-32)",
@@ -1120,8 +1125,11 @@ export function QuizOption({
         fontFamily: "var(--font-sans)",
         fontSize: "var(--text-lg)",
         textAlign: "left",
+        // A soft accent halo on hover. No scale and no travel -- the system
+        // rules both out -- so the row lights up where it stands.
+        boxShadow: state === "idle" && lit ? "0 0 0 3px var(--blue-tint-08)" : "none",
         transition:
-          "background var(--dur-fast) var(--ease-standard), border-color var(--dur-fast) var(--ease-standard)",
+          "background var(--dur-fast) var(--ease-standard), border-color var(--dur-fast) var(--ease-standard), box-shadow var(--dur-fast) var(--ease-standard), color var(--dur-fast) var(--ease-standard)",
       }}
     >
       <span
@@ -1134,15 +1142,109 @@ export function QuizOption({
           flex: "0 0 auto",
           borderRadius: "var(--radius-pill)",
           border: `1px solid ${tone.border}`,
+          background: state === "idle" && lit ? "var(--blue-tint-16)" : "transparent",
           fontFamily: "var(--font-mono)",
           fontSize: 11,
           color: tone.key,
+          transition:
+            "background var(--dur-fast) var(--ease-standard), color var(--dur-fast) var(--ease-standard), border-color var(--dur-fast) var(--ease-standard)",
         }}
       >
         {letter}
       </span>
       <span style={{ flex: 1, minWidth: 0 }}>{children}</span>
     </button>
+  );
+}
+
+// ── ProgressRing ───────────────────────────────────────────
+
+/**
+ * The thin concentric ring from the reference material.
+ *
+ * Determinate by default. `indeterminate` rotates a quarter arc instead, for
+ * work whose duration genuinely is not known -- generation runs in batches, so
+ * a determinate ring would sit at zero for most of it and read as broken.
+ *
+ * This is the one place Examprep animates a loop, which its own guidance
+ * otherwise rules out. The alternative on offer was a number that stays at 0/10
+ * for a minute, and that says less honestly that anything is happening.
+ * Reduced-motion preferences stop it, leaving a static arc.
+ */
+export function ProgressRing({
+  value = 0,
+  size = 64,
+  thickness = 1.5,
+  label,
+  indeterminate = false,
+  style,
+}: {
+  value?: number;
+  size?: number;
+  thickness?: number;
+  label?: ReactNode;
+  indeterminate?: boolean;
+  style?: CSSProperties;
+}) {
+  const radius = (size - thickness) / 2;
+  const circumference = 2 * Math.PI * radius;
+  const shown = indeterminate ? 0.26 : Math.max(0, Math.min(1, value));
+
+  return (
+    <span
+      style={{
+        position: "relative",
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        width: size,
+        height: size,
+        ...style,
+      }}
+    >
+      <svg
+        width={size}
+        height={size}
+        className={indeterminate ? "ep-spin" : undefined}
+        style={indeterminate ? undefined : { transform: "rotate(-90deg)" }}
+        aria-hidden="true"
+      >
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={radius}
+          fill="none"
+          stroke="var(--line-2)"
+          strokeWidth={thickness}
+        />
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={radius}
+          fill="none"
+          stroke="var(--accent)"
+          strokeWidth={thickness}
+          strokeDasharray={circumference}
+          strokeDashoffset={circumference * (1 - shown)}
+          strokeLinecap="round"
+          style={{
+            transition: "stroke-dashoffset var(--dur-slow) var(--ease-out)",
+          }}
+        />
+      </svg>
+      {label ? (
+        <span
+          style={{
+            position: "absolute",
+            fontFamily: "var(--font-mono)",
+            fontSize: size > 52 ? 12 : 10,
+            color: "var(--paper-0)",
+          }}
+        >
+          {label}
+        </span>
+      ) : null}
+    </span>
   );
 }
 

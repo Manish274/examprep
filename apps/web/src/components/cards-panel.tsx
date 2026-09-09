@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { ArrowLeft, ArrowRight, RotateCcw } from "lucide-react";
 import { Button, Flashcard, IconButton } from "@/ds";
-import { Empty, Failed, Working } from "./quiz-panel";
+import { Empty, Failed, Generating } from "./quiz-panel";
 import type { CardsState } from "@/hooks/use-study";
 
 /**
@@ -33,14 +33,7 @@ export function CardsPanel({
   }
 
   if (state.status === "generating") {
-    return (
-      <Working
-        label="Writing cards"
-        produced={state.produced}
-        total={state.total}
-        note="Cards are generated from the indexed material, a batch at a time."
-      />
-    );
+    return <Generating produced={state.produced} total={state.total} />;
   }
 
   if (state.status === "failed") {

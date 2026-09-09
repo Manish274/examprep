@@ -1,15 +1,15 @@
 "use client";
 
-import { Badge, Button, Card, Display, QuizOption } from "@/ds";
+import { Badge, Button, Card, Display, ProgressRing, QuizOption } from "@/ds";
 import type { QuizState } from "@/hooks/use-study";
 
 /**
  * The quiz surface.
  *
- * Multiple choice and true/false are graded without a model; a written answer
- * gets partial credit and is told what it was missing. The score is the sum of
- * what was awarded, not a count of right answers, so a half-answer reads as a
- * half-answer.
+ * Multiple choice only, so every question is graded exactly and instantly with
+ * no model call and no judgement call. The score lands at the bottom, under the
+ * answers it came from, rather than in a header the student has already
+ * scrolled past.
  */
 
 const LETTERS = ["A", "B", "C", "D", "E", "F"] as const;
@@ -43,22 +43,15 @@ export function QuizPanel({
   if (state.status === "idle") {
     return (
       <Empty
-        serif="ten questions from"
+        serif="questions from"
         sans="the pages you skipped"
-        body="Pick a document below and Examprep will write questions from it — the same index the chat reads, so a question you miss points back at the passage it came from."
+        body="Pick a document below and Examprep will write multiple-choice questions from it — the same index the chat reads, so an answer you miss points back at the passage it came from."
       />
     );
   }
 
   if (state.status === "generating") {
-    return (
-      <Working
-        label="Writing questions"
-        produced={state.produced}
-        total={state.total}
-        note="Generation is several rate-limited model calls, so this takes a moment."
-      />
-    );
+    return <Generating produced={state.produced} total={state.total} />;
   }
 
   if (state.status === "failed") {
@@ -89,21 +82,15 @@ export function QuizPanel({
         >
           {state.title}
         </h2>
-        {graded ? (
-          <span
-            style={{
-              fontFamily: "var(--font-mono)",
-              fontSize: 11,
-              color: "var(--paper-0)",
-            }}
-          >
-            {state.score} / {state.maxScore}
-          </span>
-        ) : (
-          <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-faint)" }}>
-            {state.questions.length} questions
-          </span>
-        )}
+        <span
+          style={{
+            fontFamily: "var(--font-mono)",
+            fontSize: 10,
+            color: "var(--text-faint)",
+          }}
+        >
+          {state.questions.length} questions
+        </span>
       </div>
 
       {state.questions.map((question, index) => {
@@ -174,6 +161,9 @@ export function QuizPanel({
                   })
                 : null}
 
+              {/* Only multiple choice is generated now, but a paper made before
+                  that change is still openable, so its question types still
+                  render rather than showing an empty prompt. */}
               {question.type === "true_false"
                 ? (["True", "False"] as const).map((option, optionIndex) => {
                     const selected = chosen === option;
@@ -226,7 +216,9 @@ export function QuizPanel({
                     borderRadius: "var(--radius-lg)",
                   }}
                 >
-                  <div style={{ display: "flex", alignItems: "center", gap: "var(--space-4)" }}>
+                  <div
+                    style={{ display: "flex", alignItems: "center", gap: "var(--space-4)" }}
+                  >
                     <Badge
                       tone={
                         result.isCorrect
@@ -236,7 +228,7 @@ export function QuizPanel({
                             : "wrong"
                       }
                     >
-                      {result.awarded} awarded
+                      {result.isCorrect ? "Correct" : "Missed"}
                     </Badge>
                   </div>
                   <p
@@ -256,17 +248,20 @@ export function QuizPanel({
         );
       })}
 
-      <div style={{ display: "flex", gap: "var(--space-5)", paddingLeft: 30 }}>
-        {graded ? (
-          <Button variant="outline" onClick={onReset}>
-            New quiz
-          </Button>
-        ) : (
+      {/* The grade, under the answers it came from. */}
+      {graded ? (
+        <ScoreCard
+          score={state.score ?? 0}
+          maxScore={state.maxScore ?? state.questions.length}
+          onReset={onReset}
+        />
+      ) : (
+        <div style={{ display: "flex", gap: "var(--space-5)", paddingLeft: 30 }}>
           <Button variant="primary" onClick={onSubmit}>
-            Check answers
+            Submit and grade
           </Button>
-        )}
-      </div>
+        </div>
+      )}
 
       {state.message ? (
         <p style={{ margin: 0, fontSize: "var(--text-sm)", color: "var(--state-wrong)" }}>
@@ -274,6 +269,70 @@ export function QuizPanel({
         </p>
       ) : null}
     </div>
+  );
+}
+
+// ── the grade ──────────────────────────────────────────────
+
+function ScoreCard({
+  score,
+  maxScore,
+  onReset,
+}: {
+  score: number;
+  maxScore: number;
+  onReset: () => void;
+}) {
+  const fraction = maxScore > 0 ? score / maxScore : 0;
+  const percent = Math.round(fraction * 100);
+
+  return (
+    <Card padding="var(--space-10)" wash>
+      <div
+        style={{
+          display: "flex",
+          flexWrap: "wrap",
+          alignItems: "center",
+          gap: "var(--space-9)",
+        }}
+      >
+        <ProgressRing value={fraction} size={84} label={`${percent}%`} />
+
+        <div style={{ flex: 1, minWidth: 200, display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
+          <span
+            style={{
+              fontSize: "var(--caps-size)",
+              fontWeight: 500,
+              letterSpacing: "var(--caps-track)",
+              textTransform: "uppercase",
+              color: "var(--text-faint)",
+            }}
+          >
+            Your grade
+          </span>
+          <span
+            style={{
+              fontFamily: "var(--font-mono)",
+              fontSize: 30,
+              color: "var(--paper-0)",
+              lineHeight: 1.1,
+            }}
+          >
+            {score} / {maxScore}
+          </span>
+          <span style={{ fontSize: "var(--text-sm)", color: "var(--text-muted)" }}>
+            {/* Literal, not congratulatory: the product states what it found. */}
+            {score === maxScore
+              ? "Every question correct."
+              : `${maxScore - score} to review above.`}
+          </span>
+        </div>
+
+        <Button variant="outline" onClick={onReset}>
+          New quiz
+        </Button>
+      </div>
+    </Card>
   );
 }
 
@@ -316,66 +375,52 @@ export function Empty({
   );
 }
 
-export function Working({
-  label,
+/**
+ * A ring and a word.
+ *
+ * Generation runs in rate-limited batches, so a count sits at 0 for most of it
+ * and reads as a stall. The ring fills once there is real progress to report
+ * and turns while there is not.
+ */
+export function Generating({
   produced,
   total,
-  note,
+  label = "Generating",
 }: {
-  label: string;
   produced: number;
   total: number;
-  note: string;
+  label?: string;
 }) {
-  const percent = total > 0 ? Math.round((produced / total) * 100) : 0;
+  const started = produced > 0 && total > 0;
 
   return (
-    <Card padding="var(--space-10)">
-      <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-6)" }}>
-        <span
-          style={{
-            fontSize: "var(--caps-size)",
-            fontWeight: 500,
-            letterSpacing: "var(--caps-track)",
-            textTransform: "uppercase",
-            color: "var(--text-faint)",
-          }}
-        >
-          {label}
-        </span>
-        {/* A number, never a spinner: the system's own rule, and it is the only
-            thing that tells a student whether anything is happening. */}
-        <span
-          style={{
-            fontFamily: "var(--font-mono)",
-            fontSize: 26,
-            color: "var(--paper-0)",
-          }}
-        >
-          {produced} / {total || "…"}
-        </span>
-        <div
-          style={{
-            height: 2,
-            background: "var(--line-1)",
-            borderRadius: "var(--radius-pill)",
-            overflow: "hidden",
-          }}
-        >
-          <div
-            style={{
-              width: `${percent}%`,
-              height: "100%",
-              background: "var(--accent)",
-              transition: "width var(--dur-slow) var(--ease-standard)",
-            }}
-          />
-        </div>
-        <p style={{ margin: 0, fontSize: "var(--text-sm)", color: "var(--text-muted)" }}>
-          {note}
-        </p>
-      </div>
-    </Card>
+    <div
+      className="ep-rise"
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        gap: "var(--space-7)",
+        padding: "var(--space-11) 0",
+      }}
+    >
+      <ProgressRing
+        size={72}
+        indeterminate={!started}
+        value={started ? produced / total : 0}
+      />
+      <span
+        style={{
+          fontSize: "var(--caps-size)",
+          fontWeight: 500,
+          letterSpacing: "var(--caps-track)",
+          textTransform: "uppercase",
+          color: "var(--text-faint)",
+        }}
+      >
+        {label}
+      </span>
+    </div>
   );
 }
 

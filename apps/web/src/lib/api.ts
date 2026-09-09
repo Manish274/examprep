@@ -306,6 +306,7 @@ export const createTest = (input: {
   documentId: string;
   questionCount: number;
   difficulty: string;
+  types?: string[];
 }) =>
   request<{ testId: string; title: string }>("/api/tests", {
     method: "POST",
