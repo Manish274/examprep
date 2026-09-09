@@ -1256,6 +1256,8 @@ export function ProgressRing({
 const TILT_MAX = 5;
 /** How far the card rises toward the viewer while the pointer is on it. */
 const TILT_LIFT = 6;
+/** Radius of the sheen under the cursor, in px. */
+const SHEEN = 110;
 
 const REDUCED_MOTION = "(prefers-reduced-motion: reduce)";
 
@@ -1391,15 +1393,19 @@ export function Flashcard({
     const px = (event.clientX - box.left) / box.width;
     const py = (event.clientY - box.top) / box.height;
 
-    // The corner under the pointer is the one that comes forward. Positive
-    // rotateX brings the bottom edge toward the viewer and positive rotateY
-    // pushes the right edge away, which is where the two signs come from.
-    settle((py - 0.5) * 2 * TILT_MAX, -(px - 0.5) * 2 * TILT_MAX, TILT_LIFT, true);
+    // The corner under the pointer is the one that goes back, as though the
+    // pointer were pressing it away. Positive rotateX brings the bottom edge
+    // toward the viewer and positive rotateY pushes the right edge away, which
+    // is where the two signs come from.
+    settle(-(py - 0.5) * 2 * TILT_MAX, (px - 0.5) * 2 * TILT_MAX, TILT_LIFT, true);
 
     const sheen = glare.current;
     if (sheen) {
+      // A small pool right under the cursor, sized in pixels so it stays the
+      // same on a deck card and a study card. Faint enough to read through --
+      // it is a hint of a surface catching the light, not a spotlight.
       sheen.style.opacity = "1";
-      sheen.style.background = `radial-gradient(60% 60% at ${px * 100}% ${py * 100}%, rgba(255,255,255,.09), transparent 70%)`;
+      sheen.style.background = `radial-gradient(${SHEEN}px ${SHEEN}px at ${px * 100}% ${py * 100}%, rgba(255,255,255,.05), transparent 68%)`;
     }
   }
 
