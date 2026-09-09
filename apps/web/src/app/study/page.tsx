@@ -80,13 +80,23 @@ export default function StudyPage() {
     [session],
   );
 
-  // Whether this mode has anything to show yet. Drives the whole layout.
-  const empty =
+  const studyStatus = mode === "quiz" ? study.quiz.status : study.cards.status;
+
+  // Centred while there is nothing to read: an empty chat, a study mode
+  // waiting to be set up, or one that is generating and has only a ring to
+  // show. Everything else scrolls from the top.
+  const centred =
     mode === "chat"
       ? chat.turns.length === 0
-      : mode === "quiz"
-        ? study.quiz.status === "idle"
-        : study.cards.status === "idle";
+      : studyStatus === "idle" || studyStatus === "generating";
+
+  /**
+   * The composer is the input, and there is nothing to input while a quiz is
+   * being generated or answered. Docking it there covered the paper with a
+   * panel whose only control starts a different quiz.
+   */
+  const showComposer =
+    mode === "chat" || studyStatus === "idle" || studyStatus === "failed";
 
   const firstReady = docs.ready[0]?.id;
 
@@ -269,7 +279,7 @@ export default function StudyPage() {
           </span>
         </div>
 
-        {empty ? (
+        {centred ? (
           /* One centred unit: greeting, composer, chips. */
           <div
             style={{
@@ -300,7 +310,7 @@ export default function StudyPage() {
                 sans="what are we studying?"
               />
 
-              {composer}
+              {showComposer ? composer : null}
 
               {mode === "chat" ? (
                 <div
@@ -336,7 +346,7 @@ export default function StudyPage() {
                 <CardsPanel state={study.cards} onReset={study.resetCards} />
               ) : null}
 
-              {hints}
+              {showComposer ? hints : null}
             </div>
           </div>
         ) : (
@@ -346,7 +356,9 @@ export default function StudyPage() {
               style={{
                 flex: 1,
                 overflowY: "auto",
-                padding: "72px var(--gutter) var(--space-8)",
+                // Deeper bottom padding when nothing is docked below, so the
+                // last question does not sit flush against the viewport edge.
+                padding: `72px var(--gutter) ${showComposer ? "var(--space-8)" : "var(--space-13)"}`,
               }}
             >
               <div
@@ -384,21 +396,28 @@ export default function StudyPage() {
               </div>
             </div>
 
-            <div
-              style={{
-                position: "sticky",
-                bottom: 0,
-                padding: "0 var(--gutter) var(--space-8)",
-                background: "linear-gradient(to top, var(--bg-page) 62%, transparent)",
-              }}
-            >
+            {showComposer ? (
               <div
-                style={{ width: "100%", maxWidth: "var(--canvas-max)", margin: "0 auto" }}
+                style={{
+                  position: "sticky",
+                  bottom: 0,
+                  padding: "0 var(--gutter) var(--space-8)",
+                  background:
+                    "linear-gradient(to top, var(--bg-page) 62%, transparent)",
+                }}
               >
-                {composer}
-                {hints}
+                <div
+                  style={{
+                    width: "100%",
+                    maxWidth: "var(--canvas-max)",
+                    margin: "0 auto",
+                  }}
+                >
+                  {composer}
+                  {hints}
+                </div>
               </div>
-            </div>
+            ) : null}
           </>
         )}
       </main>
