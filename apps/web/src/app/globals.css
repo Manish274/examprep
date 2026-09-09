@@ -39,3 +39,21 @@
    arc rather than nothing. */
 @keyframes epSpin { to { transform: rotate(360deg); } }
 .ep-spin { animation: epSpin 1.1s linear infinite; transform-origin: 50% 50%; }
+
+/* Flashcards move as a deck. The card you leave slides out toward the button
+   you pressed and the next one arrives from the opposite edge, so the deck has
+   a direction rather than just changing its text. Durations here are mirrored
+   by the timers in cards-panel.tsx. */
+@keyframes epCardOutLeft  { to   { opacity: 0; transform: translate3d(-9%, 0, 0) scale(.97); } }
+@keyframes epCardOutRight { to   { opacity: 0; transform: translate3d(9%, 0, 0) scale(.97); } }
+@keyframes epCardInRight  { from { opacity: 0; transform: translate3d(9%, 0, 0) scale(.97); } }
+@keyframes epCardInLeft   { from { opacity: 0; transform: translate3d(-9%, 0, 0) scale(.97); } }
+
+.ep-card-out-left  { animation: epCardOutLeft  var(--dur-fast) var(--ease-in) both; }
+.ep-card-out-right { animation: epCardOutRight var(--dur-fast) var(--ease-in) both; }
+.ep-card-in-right  { animation: epCardInRight  var(--dur-base) var(--ease-out) both; }
+.ep-card-in-left   { animation: epCardInLeft   var(--dur-base) var(--ease-out) both; }
+
+/* The dim behind a card being studied. */
+@keyframes epFade { from { opacity: 0; } to { opacity: 1; } }
+.ep-fade { animation: epFade var(--dur-base) var(--ease-out) both; }

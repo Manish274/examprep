@@ -343,7 +343,11 @@ export default function StudyPage() {
               ) : null}
 
               {mode === "cards" ? (
-                <CardsPanel state={study.cards} onReset={study.resetCards} />
+                <CardsPanel
+                  key={study.cards.setId ?? "new"}
+                  state={study.cards}
+                  onReset={study.resetCards}
+                />
               ) : null}
 
               {showComposer ? hints : null}
@@ -389,7 +393,11 @@ export default function StudyPage() {
                 ) : null}
 
                 {mode === "cards" ? (
-                  <CardsPanel state={study.cards} onReset={study.resetCards} />
+                  <CardsPanel
+                  key={study.cards.setId ?? "new"}
+                  state={study.cards}
+                  onReset={study.resetCards}
+                />
                 ) : null}
 
                 <div ref={bottom} />
