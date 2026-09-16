@@ -8,6 +8,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from pptx.enum.shapes import MSO_SHAPE_TYPE
 
 from app.core.models import BlockType, DocumentKind
 from app.parsing.pdf import PyMuPDFParser
@@ -170,3 +171,79 @@ class TestPptxParser:
             if block.type == BlockType.SPEAKER_NOTE:
                 previous = pptx_doc.blocks[index - 1]
                 assert previous.slide_number == block.slide_number
+
+
+def _png(path: Path, size: tuple[int, int] = (320, 240)) -> Path:
+    from PIL import Image
+
+    Image.new("RGB", size, (40, 90, 160)).save(path)
+    return path
+
+
+def _deck(tmp_path: Path, build) -> Path:
+    from pptx import Presentation
+    from pptx.util import Inches
+
+    presentation = Presentation()
+    build(presentation, _png(tmp_path / "diagram.png"), Inches)
+    out = tmp_path / "deck.pptx"
+    presentation.save(str(out))
+    return out
+
+
+async def _parse(path: Path):
+    return await PythonPptxParser().parse(
+        path, document_id="doc-img", filename=path.name
+    )
+
+
+class TestPptxImages:
+    """Every picture reaches the vision stage, however it was placed."""
+
+    async def test_a_free_standing_picture_is_extracted(self, tmp_path) -> None:
+        def build(p, png, inches):
+            slide = p.slides.add_slide(p.slide_layouts[5])
+            slide.shapes.title.text = "Architecture"
+            slide.shapes.add_picture(str(png), inches(1), inches(2))
+
+        doc = await _parse(_deck(tmp_path, build))
+
+        assert [(i.slide_number, i.width, i.height) for i in doc.images] == [
+            (1, 320, 240)
+        ]
+
+    async def test_a_picture_in_a_placeholder_is_extracted(self, tmp_path) -> None:
+        # Inserting through a placeholder is PowerPoint's default, and the
+        # shape then reports as PLACEHOLDER rather than PICTURE.
+        def build(p, png, inches):
+            slide = p.slides.add_slide(p.slide_layouts[8])
+            slide.shapes.title.text = "Proposed block diagram"
+            picture = slide.placeholders[1].insert_picture(str(png))
+            assert picture.shape_type == MSO_SHAPE_TYPE.PLACEHOLDER
+
+        doc = await _parse(_deck(tmp_path, build))
+
+        assert len(doc.images) == 1
+        assert doc.images[0].slide_number == 1
+        assert doc.images[0].context_hint.startswith("Proposed block diagram")
+
+    async def test_pictures_and_text_inside_a_group_are_read(self, tmp_path) -> None:
+        def build(p, png, inches):
+            slide = p.slides.add_slide(p.slide_layouts[5])
+            slide.shapes.title.text = "Signal path"
+            group = slide.shapes.add_group_shape()
+            group.shapes.add_picture(str(png), inches(1), inches(2))
+            label = group.shapes.add_textbox(inches(5), inches(2), inches(3), inches(1))
+            label.text_frame.text = "Microphone converts vibration to voltage"
+
+        doc = await _parse(_deck(tmp_path, build))
+
+        assert len(doc.images) == 1
+        assert any(
+            "Microphone converts vibration" in b.text
+            for b in doc.blocks
+            if b.type != BlockType.HEADING
+        )
+
+    async def test_a_slide_without_pictures_yields_no_images(self, pptx_doc) -> None:
+        assert pptx_doc.images == []

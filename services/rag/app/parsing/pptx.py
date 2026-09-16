@@ -19,6 +19,7 @@ from typing import Any
 
 from pptx import Presentation
 from pptx.enum.shapes import MSO_SHAPE_TYPE
+from pptx.shapes.picture import Picture
 
 from app.core.models import (
     BlockType,
@@ -65,6 +66,22 @@ def _shape_sort_key(shape: Any) -> tuple[int, int]:
     top = getattr(shape, "top", None)
     left = getattr(shape, "left", None)
     return (int(top) if top is not None else 0, int(left) if left is not None else 0)
+
+
+def _reading_order(shapes: Any) -> list[Any]:
+    """Every leaf shape, in reading order, with groups opened in place.
+
+    A group is how a hand-drawn diagram usually arrives: boxes, labels and
+    pictures bundled so they move together. Skipping the group skips all of it,
+    so its members are read where the group sits on the slide.
+    """
+    ordered: list[Any] = []
+    for shape in sorted(shapes, key=_shape_sort_key):
+        if shape.shape_type == MSO_SHAPE_TYPE.GROUP:
+            ordered.extend(_reading_order(shape.shapes))
+        else:
+            ordered.append(shape)
+    return ordered
 
 
 def _extract_body_blocks(
@@ -168,7 +185,7 @@ class PythonPptxParser:
             )
             order += 1
 
-            for shape in sorted(body_shapes, key=_shape_sort_key):
+            for shape in _reading_order(body_shapes):
                 try:
                     if shape.has_table:
                         text = normalize(_table_to_text(shape.table))
@@ -185,7 +202,10 @@ class PythonPptxParser:
                             table_count += 1
                         continue
 
-                    if shape.shape_type == MSO_SHAPE_TYPE.PICTURE:
+                    # By class, not shape type: a picture inserted through a
+                    # content placeholder -- PowerPoint's default -- reports
+                    # itself as PLACEHOLDER, and a type check skips it.
+                    if isinstance(shape, Picture):
                         # Held aside for the vision stage; parsers stay free of
                         # API calls.
                         extracted = self._extract_image(shape, slide_number, order)
