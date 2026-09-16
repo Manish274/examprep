@@ -149,6 +149,10 @@ export function CardsPanel({
 
   const first = at === 0;
   const last = at >= total - 1;
+  // Fewer cards than asked for is a result, not an error: the generator will
+  // not invent cards the material cannot support. Said plainly, so a short set
+  // does not read as a bug.
+  const shortBy = state.total > total ? state.total - total : 0;
 
   return (
     <>
@@ -181,6 +185,19 @@ export function CardsPanel({
             {at + 1} / {total}
           </span>
         </div>
+
+        {shortBy > 0 ? (
+          <p
+            style={{
+              margin: "calc(var(--space-6) * -1) 0 0",
+              fontSize: "var(--text-sm)",
+              color: "var(--text-muted)",
+            }}
+          >
+            {total} of the {state.total} cards you asked for. The rest would have
+            needed material this document does not contain.
+          </p>
+        ) : null}
 
         <div className={slide}>
           <Flashcard

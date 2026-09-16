@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 from app.core.models import Chunk
 from app.generation.study import (
     DEFAULT_BATCH_SIZE,
+    LabelledBatch,
     batches,
     messages,
     parse_json_items,
@@ -82,6 +83,7 @@ class FlashcardGenerationResult:
     batches_run: int = 0
     discarded: int = 0
     failed_batches: int = 0
+    top_up_calls: int = 0
 
     def as_dict(self) -> dict[str, int]:
         return {
@@ -89,6 +91,7 @@ class FlashcardGenerationResult:
             "batches_run": self.batches_run,
             "discarded": self.discarded,
             "failed_batches": self.failed_batches,
+            "top_up_calls": self.top_up_calls,
         }
 
 
@@ -112,73 +115,131 @@ class FlashcardGenerator:
 
         sampled = spread(pool, min(card_count, len(pool)))
         grouped = batches(sampled, self._batch_size)
-        per_batch = max(1, -(-card_count // max(len(grouped), 1)))
 
         seen_fronts: set[str] = set()
+        # Cards written per chunk, so a top-up goes to the passages the first
+        # pass used least.
+        used: dict[str, int] = {}
 
+        chunks_left = len(sampled)
         for index, batch in enumerate(grouped):
-            if len(result.cards) >= card_count:
+            wanted = card_count - len(result.cards)
+            if wanted <= 0:
                 break
 
-            ask_for = min(per_batch, card_count - len(result.cards))
+            # Shared out by chunk count. An even split asks a two-chunk tail
+            # batch for as many cards as a full one, and the full one for too
+            # few; the last batch is always asked for everything still owed.
+            share = len(batch.by_label)
+            ask_for = max(1, round(wanted * share / chunks_left))
+            chunks_left -= share
+
             user = (
-                f"Write up to {ask_for} flashcard(s) from the passages below.\n\n"
+                f"Write {ask_for} flashcard(s) from the passages below. If the "
+                f"passages cannot support {ask_for} distinct, well-grounded "
+                "cards, write as many as they genuinely support.\n\n"
                 f"Passages:\n\n{batch.text}"
             )
-
-            try:
-                response = await self._llm.complete(  # type: ignore[attr-defined]
-                    messages(_SYSTEM, user),
-                    temperature=0.5,
-                    max_tokens=8000,
-                    json_schema=_SCHEMA,
-                )
-                items = parse_json_items(response.text)
-            except Exception as exc:
-                # One bad batch must not abandon the rest of the set.
-                logger.warning("flashcard batch %s failed: %s", index, exc)
-                result.failed_batches += 1
-                continue
-
-            result.batches_run += 1
-
-            for item in items:
-                if len(result.cards) >= card_count:
-                    break
-
-                front = str(item.get("front", "")).strip()
-                back = str(item.get("back", "")).strip()
-                if not front or not back:
-                    result.discarded += 1
-                    continue
-
-                # A card that has become a summary is worse than no card: it
-                # cannot be recalled in the few seconds a card is for.
-                if len(back) > MAX_BACK_CHARS:
-                    result.discarded += 1
-                    continue
-
-                key = front.lower().rstrip("?. ")
-                if key in seen_fronts:
-                    # Batches overlap in subject matter; duplicates waste the
-                    # student's revision time.
-                    result.discarded += 1
-                    continue
-
-                chunk = resolve_source(item, batch)
-                if chunk is None:
-                    result.discarded += 1
-                    continue
-
-                seen_fronts.add(key)
-                result.cards.append(
-                    GeneratedCard(front=front, back=back, source_chunk_id=chunk.id)
-                )
+            await self._run_batch(
+                batch, user, index, result, seen_fronts, used, card_count
+            )
 
             if on_progress is not None:
                 on_progress(len(result.cards), card_count)  # type: ignore[operator]
 
             await asyncio.sleep(0)
 
+        # Models under-deliver: asked for four, they often write two. One more
+        # call, over the passages used least, recovers most of the shortfall
+        # for a bounded cost -- every call comes out of a small daily quota.
+        shortfall = card_count - len(result.cards)
+        if shortfall > 0:
+            least_used = sorted(
+                pool, key=lambda c: (used.get(c.id, 0), c.metadata.chunk_index)
+            )[: self._batch_size]
+            least_used.sort(key=lambda c: c.metadata.chunk_index)
+            batch = batches(least_used, self._batch_size)[0]
+
+            written = "\n".join(f"- {card.front}" for card in result.cards)
+            existing = (
+                "These cards already exist. Do not repeat or rephrase them:\n"
+                f"{written}\n\n"
+                if written
+                else ""
+            )
+            user = (
+                f"Write {shortfall} more flashcard(s) from the passages below. "
+                f"If the passages cannot support {shortfall} new, distinct, "
+                "well-grounded cards, write as many as they genuinely support.\n\n"
+                f"{existing}Passages:\n\n{batch.text}"
+            )
+            result.top_up_calls += 1
+            await self._run_batch(
+                batch, user, len(grouped), result, seen_fronts, used, card_count
+            )
+
+            if on_progress is not None:
+                on_progress(len(result.cards), card_count)  # type: ignore[operator]
+
         logger.info("generated flashcards: %s", result.as_dict())
         return result
+
+    async def _run_batch(
+        self,
+        batch: LabelledBatch,
+        user: str,
+        index: int,
+        result: FlashcardGenerationResult,
+        seen_fronts: set[str],
+        used: dict[str, int],
+        card_count: int,
+    ) -> None:
+        try:
+            response = await self._llm.complete(  # type: ignore[attr-defined]
+                messages(_SYSTEM, user),
+                temperature=0.5,
+                max_tokens=8000,
+                json_schema=_SCHEMA,
+            )
+            items = parse_json_items(response.text)
+        except Exception as exc:
+            # One bad batch must not abandon the rest of the set.
+            logger.warning("flashcard batch %s failed: %s", index, exc)
+            result.failed_batches += 1
+            return
+
+        result.batches_run += 1
+
+        for item in items:
+            if len(result.cards) >= card_count:
+                break
+
+            front = str(item.get("front", "")).strip()
+            back = str(item.get("back", "")).strip()
+            if not front or not back:
+                result.discarded += 1
+                continue
+
+            # A card that has become a summary is worse than no card: it
+            # cannot be recalled in the few seconds a card is for.
+            if len(back) > MAX_BACK_CHARS:
+                result.discarded += 1
+                continue
+
+            key = front.lower().rstrip("?. ")
+            if key in seen_fronts:
+                # Batches overlap in subject matter; duplicates waste the
+                # student's revision time.
+                result.discarded += 1
+                continue
+
+            chunk = resolve_source(item, batch)
+            if chunk is None:
+                result.discarded += 1
+                continue
+
+            seen_fronts.add(key)
+            used[chunk.id] = used.get(chunk.id, 0) + 1
+            result.cards.append(
+                GeneratedCard(front=front, back=back, source_chunk_id=chunk.id)
+            )
