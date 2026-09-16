@@ -234,6 +234,17 @@ def build_tracer(settings: Settings) -> object:
     return sinks[0] if len(sinks) == 1 else MultiTracer(sinks)
 
 
+def recheck_threshold(settings: Settings, reranker: object) -> float | None:
+    """The refusal-recheck threshold, or None when the scores cannot support it.
+
+    A rank-derived score gives the top passage 1.0 however irrelevant it is, so
+    against one every refusal would look like a contradiction.
+    """
+    if not getattr(reranker, "calibrated", False):
+        return None
+    return settings.CHAT_RECHECK_MIN_RELEVANCE
+
+
 class Container:
     """Holds the wired pipeline and owns the lifetimes of its clients."""
 
@@ -280,6 +291,7 @@ class Container:
             utility_llm=self.utility_llm,
             history_turns=settings.CHAT_HISTORY_TURNS,
             history_tokens=settings.CHAT_HISTORY_MAX_TOKENS,
+            recheck_min_relevance=recheck_threshold(settings, self.reranker),
         )
 
     async def startup(self) -> None:
@@ -347,5 +359,6 @@ def build_test_container(settings: Settings) -> Container:
             utility_llm=container.utility_llm,
             history_turns=settings.CHAT_HISTORY_TURNS,
             history_tokens=settings.CHAT_HISTORY_MAX_TOKENS,
+            recheck_min_relevance=recheck_threshold(settings, container.reranker),
         )
     return container

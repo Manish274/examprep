@@ -18,6 +18,8 @@ from app.generation.chat import ChatRequest, ChatService, ChatTurn, is_refusal
 from app.generation.context import ContextBuilder
 from app.generation.llm import GeminiLLMProvider, MockLLMProvider, _split_messages
 from app.generation.prompts import (
+    RECHECK_NOTE,
+    UNSUPPORTED_REPLY,
     UNSUPPORTED_TOKEN,
     condense_prompt,
     system_prompt,
@@ -528,3 +530,159 @@ class TestConversationMemory:
             "assistant",
             "user",
         ]
+
+
+class Scripted(MockLLMProvider):
+    """Replies in order, one per call, and records each call's temperature."""
+
+    def __init__(self, *replies: str) -> None:
+        super().__init__()
+        self.replies = list(replies)
+        self.temperatures: list[float] = []
+
+    def _answer(self, messages):
+        self.calls.append(list(messages))
+        return self.replies[min(len(self.calls), len(self.replies)) - 1]
+
+    async def complete(self, messages, *, temperature=0.2, **kwargs):
+        self.temperatures.append(temperature)
+        return await super().complete(messages, temperature=temperature, **kwargs)
+
+    async def stream(self, messages, *, temperature=0.2, **kwargs):
+        self.temperatures.append(temperature)
+        async for piece in super().stream(messages, temperature=temperature, **kwargs):
+            yield piece
+
+
+def _relevant(score: float | None) -> list[ScoredChunk]:
+    chunk = _chunk("The sensor uses a capacitive microphone.")
+    chunk.rerank_score = score
+    return [chunk]
+
+
+def _rechecking(
+    llm: object, *, relevance: float | None, threshold: float | None = 0.4
+) -> ChatService:
+    return ChatService(
+        FakeRetrieval(_relevant(relevance)),
+        ContextBuilder(counter=HeuristicTokenCounter()),
+        llm,
+        recheck_min_relevance=threshold,
+    )
+
+
+class TestRefusalRecheck:
+    """A refusal that contradicts strong retrieval gets exactly one more look."""
+
+    async def _stream(self, service: ChatService) -> tuple[str, object]:
+        tokens: list[str] = []
+        final = None
+        async for kind, value in service.stream(_request()):
+            if kind == "token":
+                tokens.append(str(value))
+            else:
+                final = value
+        return "".join(tokens), final
+
+    async def test_a_refusal_despite_strong_evidence_is_regenerated(self) -> None:
+        llm = Scripted(UNSUPPORTED_TOKEN, "It uses a capacitive microphone [S1].")
+        result = await _rechecking(llm, relevance=0.56).answer(_request())
+
+        assert not result.unsupported
+        assert "capacitive microphone" in result.text
+        assert [s.marker for s in result.sources] == ["S1"]
+        assert len(llm.calls) == 2
+
+    async def test_the_recheck_is_deterministic_and_says_why(self) -> None:
+        llm = Scripted(UNSUPPORTED_TOKEN, "Answer [S1].")
+        await _rechecking(llm, relevance=0.56).answer(_request())
+
+        assert llm.temperatures == [0.2, 0.0]
+        assert RECHECK_NOTE not in llm.calls[0][-1].content
+        assert llm.calls[1][-1].content.endswith(RECHECK_NOTE)
+        # The grounding rules are not relaxed for the second attempt.
+        assert llm.calls[0][0].content == llm.calls[1][0].content
+
+    async def test_weak_evidence_is_refused_without_a_second_call(self) -> None:
+        # An off-topic question scored 0.03 against a real deck.
+        llm = Scripted(UNSUPPORTED_TOKEN, "Invented answer [S1].")
+        result = await _rechecking(llm, relevance=0.03).answer(_request())
+
+        assert result.unsupported
+        assert len(llm.calls) == 1
+
+    async def test_no_threshold_means_no_recheck(self) -> None:
+        llm = Scripted(UNSUPPORTED_TOKEN, "Answer [S1].")
+        result = await _rechecking(llm, relevance=0.9, threshold=None).answer(
+            _request()
+        )
+
+        assert result.unsupported
+        assert len(llm.calls) == 1
+
+    async def test_no_reranker_score_means_no_recheck(self) -> None:
+        # Without a reranker there is no calibrated evidence to contradict.
+        llm = Scripted(UNSUPPORTED_TOKEN, "Answer [S1].")
+        result = await _rechecking(llm, relevance=None).answer(_request())
+
+        assert result.unsupported
+        assert len(llm.calls) == 1
+
+    async def test_an_answer_is_never_rechecked(self) -> None:
+        llm = Scripted("Answer [S1].", "A different answer [S1].")
+        result = await _rechecking(llm, relevance=0.9).answer(_request())
+
+        assert result.text == "Answer [S1]."
+        assert len(llm.calls) == 1
+
+    async def test_a_refusal_that_stands_is_still_a_refusal(self) -> None:
+        llm = Scripted(UNSUPPORTED_TOKEN, UNSUPPORTED_TOKEN)
+        result = await _rechecking(llm, relevance=0.56).answer(_request())
+
+        assert result.unsupported
+        assert result.sources == []
+        assert len(llm.calls) == 2
+
+    async def test_streaming_shows_only_the_rechecked_answer(self) -> None:
+        llm = Scripted(UNSUPPORTED_TOKEN, "It uses a capacitive microphone [S1].")
+        text, final = await self._stream(_rechecking(llm, relevance=0.56))
+
+        assert text.strip() == "It uses a capacitive microphone [S1]."
+        assert UNSUPPORTED_TOKEN not in text
+        assert UNSUPPORTED_REPLY not in text
+        assert final is not None
+        assert not final.unsupported
+        assert llm.temperatures == [0.2, 0.0]
+
+    async def test_streaming_a_refusal_that_stands_explains_it_once(self) -> None:
+        llm = Scripted(UNSUPPORTED_TOKEN, UNSUPPORTED_TOKEN)
+        text, final = await self._stream(_rechecking(llm, relevance=0.56))
+
+        assert text.strip() == UNSUPPORTED_REPLY
+        assert final is not None
+        assert final.unsupported
+        assert len(llm.calls) == 2
+
+    async def test_streaming_weak_evidence_is_not_rechecked(self) -> None:
+        llm = Scripted(UNSUPPORTED_TOKEN, "Answer [S1].")
+        _, final = await self._stream(_rechecking(llm, relevance=0.03))
+
+        assert final is not None
+        assert final.unsupported
+        assert len(llm.calls) == 1
+
+
+class TestRecheckThreshold:
+    def test_only_a_calibrated_reranker_enables_the_recheck(self) -> None:
+        from app.config import Settings
+        from app.container import recheck_threshold
+        from app.reranking.rerankers import (
+            GeminiListwiseReranker,
+            JinaReranker,
+            NoOpReranker,
+        )
+
+        settings = Settings(CHAT_RECHECK_MIN_RELEVANCE=0.4)
+        assert recheck_threshold(settings, JinaReranker("key")) == 0.4
+        assert recheck_threshold(settings, GeminiListwiseReranker("key")) is None
+        assert recheck_threshold(settings, NoOpReranker()) is None

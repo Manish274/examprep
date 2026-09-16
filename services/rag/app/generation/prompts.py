@@ -82,6 +82,19 @@ def user_prompt(question: str, context: str) -> str:
     return f"Study material:\n\n{context}\n\n---\n\nQuestion: {question}"
 
 
+RECHECK_NOTE = (
+    "The sources above were ranked as closely relevant to this question. Read "
+    "them again carefully: if they explain the answer, even in different words "
+    "from the question, answer from them and cite them. Reply "
+    f"{UNSUPPORTED_TOKEN} only if they genuinely do not contain it."
+)
+"""Appended to the question when a refusal contradicts strong retrieval.
+
+It does not relax the grounding rules -- the system prompt is unchanged -- it
+only asks the model to look again at evidence the reranker rated highly.
+"""
+
+
 NO_CONTEXT_REPLY = (
     "I could not find anything in your uploaded material that answers this. "
     "It may be in a document you have not uploaded yet, or on a page that was "

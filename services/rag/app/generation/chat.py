@@ -10,6 +10,14 @@ Rewriting it against the conversation into a standalone question is what makes
 a follow-up work at all. It is skipped for the first message, where there is no
 history and the call would be pure latency.
 
+**Rechecking a refusal.** A refusal is sampled like any other output, and the
+model sometimes declines a question whose answer is sitting in the top-ranked
+source. When the reranker says the evidence is strong and the model still
+refuses, the answer is regenerated once, deterministically, with a note that
+the sources were judged relevant. The grounding rules are unchanged, so a
+question the material genuinely does not cover is still refused -- it has just
+cost one extra call, and only on that path.
+
 **Verification.** After generation, every marker the model emitted is resolved
 against the sources it was given. A model can write [S9] when three sources
 exist; rendering that would show the student a citation to material that was
@@ -39,6 +47,7 @@ from app.generation.context import BuiltContext, verify_citations
 from app.generation.history import prepare as prepare_history
 from app.generation.prompts import (
     NO_CONTEXT_REPLY,
+    RECHECK_NOTE,
     UNSUPPORTED_REPLY,
     UNSUPPORTED_TOKEN,
     condense_prompt,
@@ -90,6 +99,28 @@ def is_refusal(text: str) -> bool:
     return stripped.startswith(UNSUPPORTED_TOKEN)
 
 
+@dataclass
+class _Attempt:
+    """One pass of streamed generation, and what came of it."""
+
+    buffer: list[str] = field(default_factory=list)
+    refused: bool = False
+    # Whether any text reached the student. A refusal can only be retried
+    # while this is still false; otherwise the retry would append a second
+    # answer to the first.
+    forwarded: bool = False
+
+    @property
+    def raw(self) -> str:
+        return "".join(self.buffer).strip()
+
+
+def strongest_relevance(chunks: Sequence[ScoredChunk]) -> float | None:
+    """The best reranker relevance among the retrieved chunks, if there is one."""
+    scores = [c.rerank_score for c in chunks if c.rerank_score is not None]
+    return max(scores) if scores else None
+
+
 class ChatService:
     def __init__(
         self,
@@ -100,6 +131,7 @@ class ChatService:
         utility_llm: object | None = None,
         history_turns: int = 8,
         history_tokens: int = 1500,
+        recheck_min_relevance: float | None = None,
     ) -> None:
         self._retrieval = retrieval
         self._context = context_builder
@@ -112,6 +144,17 @@ class ChatService:
         # A smaller model for query rewriting: high frequency, low difficulty,
         # and it keeps the main model's quota for answering.
         self._utility_llm = utility_llm or llm
+        # None disables the recheck. It is only meaningful with a reranker
+        # whose scores are calibrated relevance; a rank-derived score says
+        # nothing about whether the material covers the question.
+        self._recheck_min_relevance = recheck_min_relevance
+
+    def _worth_rechecking(self, strongest: float | None) -> bool:
+        return (
+            self._recheck_min_relevance is not None
+            and strongest is not None
+            and strongest >= self._recheck_min_relevance
+        )
 
     async def condense(self, request: ChatRequest) -> str:
         """Rewrites a follow-up into a standalone question."""
@@ -157,8 +200,12 @@ class ChatService:
 
     async def gather(
         self, request: ChatRequest
-    ) -> tuple[BuiltContext, str, dict[str, int]]:
-        """Everything up to generation: condense, retrieve, build context."""
+    ) -> tuple[BuiltContext, str, dict[str, int], float | None]:
+        """Everything up to generation: condense, retrieve, build context.
+
+        Also returns the strongest reranker relevance, which is what decides
+        whether a refusal is worth a second look.
+        """
         timings: dict[str, int] = {}
 
         started = time.perf_counter()
@@ -198,10 +245,10 @@ class ChatService:
             )
 
         timings["retrieved"] = len(chunks)
-        return context, query, timings
+        return context, query, timings, strongest_relevance(chunks)
 
     def _messages(
-        self, request: ChatRequest, context: BuiltContext
+        self, request: ChatRequest, context: BuiltContext, *, recheck: bool = False
     ) -> list[LLMMessage]:
         """System prompt, then the conversation, then this question.
 
@@ -223,12 +270,10 @@ class ChatService:
         ):
             messages.append(LLMMessage(role=turn.role, content=turn.content))
 
-        messages.append(
-            LLMMessage(
-                role="user",
-                content=user_prompt(request.question, context.text),
-            )
-        )
+        content = user_prompt(request.question, context.text)
+        if recheck:
+            content = f"{content}\n\n{RECHECK_NOTE}"
+        messages.append(LLMMessage(role="user", content=content))
         return messages
 
     def _finish(
@@ -264,7 +309,7 @@ class ChatService:
         )
 
     async def answer(self, request: ChatRequest) -> ChatResult:
-        context, query, timings = await self.gather(request)
+        context, query, timings, strongest = await self.gather(request)
 
         if context.is_empty:
             # Nothing retrieved. Asking the model anyway invites exactly the
@@ -287,16 +332,31 @@ class ChatService:
             response = await self._llm.complete(  # type: ignore[attr-defined]
                 self._messages(request, context), temperature=0.2, max_tokens=4000
             )
+            prompt_tokens = response.usage.prompt_tokens
+            completion_tokens = response.usage.completion_tokens
+
+            rechecked = False
+            if is_refusal(response.text) and self._worth_rechecking(strongest):
+                rechecked = True
+                response = await self._llm.complete(  # type: ignore[attr-defined]
+                    self._messages(request, context, recheck=True),
+                    temperature=0.0,
+                    max_tokens=4000,
+                )
+                prompt_tokens += response.usage.prompt_tokens
+                completion_tokens += response.usage.completion_tokens
+
             timings["generate_ms"] = int((time.perf_counter() - started) * 1000)
 
             result = self._finish(response.text, context, query, timings)
-            result.prompt_tokens = response.usage.prompt_tokens
-            result.completion_tokens = response.usage.completion_tokens
+            result.prompt_tokens = prompt_tokens
+            result.completion_tokens = completion_tokens
             observed.output(
                 unsupported=result.unsupported,
                 cited=[s.marker for s in result.sources],
                 dangling=result.dangling_citations,
                 characters=len(result.text),
+                rechecked=rechecked,
             )
             observed.meta(
                 prompt_tokens=result.prompt_tokens,
@@ -344,7 +404,7 @@ class ChatService:
         verified against the sources: citations cannot be checked until the
         answer is complete.
         """
-        context, query, timings = await self.gather(request)
+        context, query, timings, strongest = await self.gather(request)
 
         if context.is_empty:
             yield "token", NO_CONTEXT_REPLY
@@ -359,43 +419,39 @@ class ChatService:
 
         started = time.perf_counter()
         started_at = datetime.now(timezone.utc)
-        buffer: list[str] = []
-        held: list[str] = []
-        refused = False
 
-        async for delta in self._llm.stream(  # type: ignore[attr-defined]
-            self._messages(request, context), temperature=0.2, max_tokens=4000
+        attempt = _Attempt()
+        async for text in self._stream_attempt(
+            self._messages(request, context), 0.2, attempt
         ):
-            buffer.append(delta)
+            yield "token", text
 
-            if refused:
-                continue
-
-            # Hold the opening tokens back until it is clear whether this is a
-            # refusal. Streaming "NOT_SUPPORTED" to the student and then
-            # replacing it would be worse than a brief pause.
-            if len(held) < 4 and len("".join(held)) < len(UNSUPPORTED_TOKEN) + 4:
-                held.append(delta)
-                if is_refusal("".join(held)):
-                    refused = True
-                    continue
-                if len("".join(held)) < len(UNSUPPORTED_TOKEN):
-                    continue
-                yield "token", "".join(held)
-                held.clear()
-                continue
-
-            yield "token", delta
-
-        if held and not refused:
-            yield "token", "".join(held)
+        # Nothing has reached the student yet -- the opening of a refusal is
+        # held back -- so a second attempt streams as though it were the first.
+        rechecked = False
+        if (
+            attempt.refused
+            and not attempt.forwarded
+            and self._worth_rechecking(strongest)
+        ):
+            rechecked = True
+            attempt = _Attempt()
+            async for text in self._stream_attempt(
+                self._messages(request, context, recheck=True), 0.0, attempt
+            ):
+                yield "token", text
 
         timings["generate_ms"] = int((time.perf_counter() - started) * 1000)
-        raw = "".join(buffer).strip()
+        raw = attempt.raw
 
-        if refused or is_refusal(raw):
+        if attempt.refused:
             await self._record_generation(
-                request, context, started_at, timings, unsupported=True
+                request,
+                context,
+                started_at,
+                timings,
+                unsupported=True,
+                rechecked=rechecked,
             )
             yield "token", UNSUPPORTED_REPLY
             yield "done", ChatResult(
@@ -417,5 +473,47 @@ class ChatService:
             cited=[s.marker for s in result.sources],
             dangling=result.dangling_citations,
             characters=len(result.text),
+            rechecked=rechecked,
         )
         yield "done", result
+
+    async def _stream_attempt(
+        self, messages: list[LLMMessage], temperature: float, attempt: _Attempt
+    ) -> AsyncIterator[str]:
+        """Streams one generation, holding back the opening until it is clear
+        whether the model is refusing.
+
+        Streaming "NOT_SUPPORTED" to the student and then replacing it would be
+        worse than a brief pause.
+        """
+        held: list[str] = []
+
+        async for delta in self._llm.stream(  # type: ignore[attr-defined]
+            messages, temperature=temperature, max_tokens=4000
+        ):
+            attempt.buffer.append(delta)
+
+            if attempt.refused:
+                continue
+
+            if len(held) < 4 and len("".join(held)) < len(UNSUPPORTED_TOKEN) + 4:
+                held.append(delta)
+                if is_refusal("".join(held)):
+                    attempt.refused = True
+                    continue
+                if len("".join(held)) < len(UNSUPPORTED_TOKEN):
+                    continue
+                attempt.forwarded = True
+                yield "".join(held)
+                held.clear()
+                continue
+
+            attempt.forwarded = True
+            yield delta
+
+        if held and not attempt.refused:
+            attempt.forwarded = True
+            yield "".join(held)
+
+        if is_refusal(attempt.raw):
+            attempt.refused = True

@@ -63,6 +63,9 @@ class NoOpReranker:
     """
 
     name = "noop"
+    # Whether `rerank_score` is a calibrated relevance that can be compared
+    # against a fixed threshold, rather than a position in an ordering.
+    calibrated = False
 
     async def rerank(
         self, query: str, candidates: Sequence[ScoredChunk], *, top_n: int
@@ -79,6 +82,7 @@ class JinaReranker:
     """
 
     name = "jina"
+    calibrated = True
 
     def __init__(
         self,
@@ -185,6 +189,9 @@ class GeminiListwiseReranker:
     """
 
     name = "gemini_listwise"
+    # Scores are derived from rank (1, 1/2, 1/3...): the top passage always
+    # scores 1.0, however irrelevant it is.
+    calibrated = False
 
     _PROMPT = (
         "You are ranking passages by how well each one answers a question.\n\n"
