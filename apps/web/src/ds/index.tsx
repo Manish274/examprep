@@ -884,6 +884,9 @@ export function Message({
 
 // ── NavItem / RailSection ──────────────────────────────────
 
+/** Mirrors the epRipple duration in globals.css, with a frame to spare. */
+const RIPPLE_MS = 560;
+
 export function NavItem({
   icon,
   children,
@@ -893,6 +896,7 @@ export function NavItem({
   muted = false,
   onClick,
   title,
+  glow = false,
 }: {
   icon?: LucideIcon;
   children: ReactNode;
@@ -902,16 +906,53 @@ export function NavItem({
   muted?: boolean;
   onClick?: () => void;
   title?: string;
+  /** A light that follows the pointer, and a ripple on press. For the rail's
+   *  main destinations, not for every row in a list. */
+  glow?: boolean;
 }) {
   const [hover, setHover] = useState(false);
+  const [ripples, setRipples] = useState<{ id: number; x: number; y: number }[]>([]);
+  const rippleId = useRef(0);
+  // A hidden ripple never finishes animating, so it would never be removed.
+  const reduced = usePrefersReducedMotion();
+
+  // Written straight to the element: the light moves every frame the pointer
+  // does, and a state update per frame would re-render the row to move it.
+  function track(event: React.PointerEvent<HTMLButtonElement>) {
+    if (!glow) return;
+    const box = event.currentTarget.getBoundingClientRect();
+    event.currentTarget.style.setProperty("--gx", `${event.clientX - box.left}px`);
+    event.currentTarget.style.setProperty("--gy", `${event.clientY - box.top}px`);
+  }
+
+  function press(event: React.PointerEvent<HTMLButtonElement>) {
+    if (!glow || event.button !== 0) return;
+    track(event);
+    if (reduced) return;
+    const box = event.currentTarget.getBoundingClientRect();
+    const id = ++rippleId.current;
+    setRipples((live) => [
+      ...live,
+      { id, x: event.clientX - box.left, y: event.clientY - box.top },
+    ]);
+    // A timer rather than animationend, which a tab that is not painting --
+    // backgrounded mid-press -- may never deliver.
+    window.setTimeout(
+      () => setRipples((live) => live.filter((r) => r.id !== id)),
+      RIPPLE_MS,
+    );
+  }
 
   return (
     <button
       type="button"
       onClick={onClick}
       title={title}
+      className={glow ? "ep-glow" : undefined}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
+      onPointerMove={glow ? track : undefined}
+      onPointerDown={glow ? press : undefined}
       style={{
         display: "flex",
         alignItems: "center",
@@ -957,7 +998,11 @@ export function NavItem({
         <Icon
           as={icon}
           size={15}
-          style={{ color: active ? "var(--paper-0)" : "var(--text-muted)" }}
+          style={{
+            color:
+              active || (glow && hover) ? "var(--paper-0)" : "var(--text-muted)",
+            transition: "color var(--dur-fast) var(--ease-standard)",
+          }}
         />
       ) : null}
       <span
@@ -971,6 +1016,14 @@ export function NavItem({
       >
         {children}
       </span>
+      {ripples.map((ripple) => (
+        <span
+          key={ripple.id}
+          aria-hidden
+          className="ep-ripple"
+          style={{ left: ripple.x, top: ripple.y }}
+        />
+      ))}
       {badge ? (
         <span
           style={{

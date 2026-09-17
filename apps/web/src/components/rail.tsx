@@ -106,6 +106,7 @@ export function Rail({
         <RailSection title="Study">
           <NavItem
             icon={MessageCircle}
+            glow
             active={mode === "chat"}
             onClick={() => onModeChange("chat")}
           >
@@ -113,6 +114,7 @@ export function Rail({
           </NavItem>
           <NavItem
             icon={Target}
+            glow
             active={mode === "quiz"}
             onClick={() => onModeChange("quiz")}
           >
@@ -120,6 +122,7 @@ export function Rail({
           </NavItem>
           <NavItem
             icon={Layers}
+            glow
             active={mode === "cards"}
             onClick={() => onModeChange("cards")}
           >
