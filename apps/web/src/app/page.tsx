@@ -113,13 +113,6 @@ export default function LandingPage() {
             Sources
           </a>
         </nav>
-        <div style={{ display: "flex", alignItems: "center", gap: "var(--space-4)" }}>
-          <Link href="/start">
-            <Button variant="paper" size="sm" caps>
-              Get started
-            </Button>
-          </Link>
-        </div>
       </header>
 
       {/* ── hero ─────────────────────────────────────────── */}
