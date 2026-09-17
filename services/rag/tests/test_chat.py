@@ -14,10 +14,17 @@ from app.core.models import (
     ScoredChunk,
 )
 from app.core.tokenizer import HeuristicTokenCounter
-from app.generation.chat import ChatRequest, ChatService, ChatTurn, is_refusal
+from app.generation.chat import (
+    ChatRequest,
+    ChatService,
+    ChatTurn,
+    Evidence,
+    is_refusal,
+)
 from app.generation.context import ContextBuilder
 from app.generation.llm import GeminiLLMProvider, MockLLMProvider, _split_messages
 from app.generation.prompts import (
+    NO_CONTEXT_REPLY,
     RECHECK_NOTE,
     UNSUPPORTED_REPLY,
     UNSUPPORTED_TOKEN,
@@ -686,3 +693,117 @@ class TestRecheckThreshold:
         assert recheck_threshold(settings, JinaReranker("key")) == 0.4
         assert recheck_threshold(settings, GeminiListwiseReranker("key")) is None
         assert recheck_threshold(settings, NoOpReranker()) is None
+
+    def test_only_a_calibrated_reranker_enables_the_off_topic_check(self) -> None:
+        from app.config import Settings
+        from app.container import off_topic_thresholds
+        from app.reranking.rerankers import (
+            GeminiListwiseReranker,
+            JinaReranker,
+            NoOpReranker,
+        )
+
+        settings = Settings(
+            CHAT_OFF_TOPIC_MAX_SIMILARITY=0.55, CHAT_OFF_TOPIC_MAX_RELEVANCE=0.1
+        )
+        assert off_topic_thresholds(settings, JinaReranker("key")) == (0.55, 0.1)
+        assert off_topic_thresholds(settings, GeminiListwiseReranker("key")) is None
+        assert off_topic_thresholds(settings, NoOpReranker()) is None
+
+
+def _scored(similarity: float | None, relevance: float | None) -> list[ScoredChunk]:
+    chunk = _chunk("The sensor uses a capacitive microphone.")
+    chunk.dense_score = similarity
+    chunk.rerank_score = relevance
+    return [chunk]
+
+
+def _gated(
+    llm: object,
+    *,
+    similarity: float | None,
+    relevance: float | None,
+    bounds: tuple[float, float] | None = (0.55, 0.10),
+) -> ChatService:
+    return ChatService(
+        FakeRetrieval(_scored(similarity, relevance)),
+        ContextBuilder(counter=HeuristicTokenCounter()),
+        llm,
+        off_topic_below=bounds,
+    )
+
+
+class TestEvidence:
+    def test_takes_the_best_of_each_signal(self) -> None:
+        low, high = _chunk("a", 0), _chunk("b", 1)
+        low.dense_score, low.rerank_score = 0.7, 0.1
+        high.dense_score, high.rerank_score = 0.5, 0.6
+
+        evidence = Evidence.of([low, high])
+
+        assert evidence.similarity == 0.7
+        assert evidence.relevance == 0.6
+
+    def test_a_missing_signal_stays_missing(self) -> None:
+        evidence = Evidence.of(_scored(None, None))
+        assert evidence.similarity is None
+        assert evidence.relevance is None
+
+
+class TestOffTopicQuestions:
+    """Measured scores from a real deck set the cases below."""
+
+    async def test_plainly_unrelated_questions_never_reach_the_model(self) -> None:
+        # "Who won the FIFA World Cup in 2018?": 0.475 similarity, 0.033 relevance.
+        llm = MockLLMProvider(reply="Argentina [S1].")
+        result = await _gated(llm, similarity=0.475, relevance=0.033).answer(_request())
+
+        assert result.unsupported
+        assert result.text == NO_CONTEXT_REPLY
+        assert result.sources == []
+        assert result.retrieved == 1
+        assert llm.calls == []
+
+    async def test_a_terse_real_question_is_not_turned_away(self) -> None:
+        # "buzzer role": similarity below the bound, relevance above it.
+        llm = MockLLMProvider(reply="It beeps [S1].")
+        result = await _gated(llm, similarity=0.548, relevance=0.136).answer(_request())
+
+        assert not result.unsupported
+        assert len(llm.calls) == 1
+
+    async def test_high_similarity_alone_is_enough_to_ask(self) -> None:
+        llm = MockLLMProvider(reply="Answer [S1].")
+        result = await _gated(llm, similarity=0.61, relevance=0.068).answer(_request())
+
+        assert not result.unsupported
+        assert len(llm.calls) == 1
+
+    async def test_no_reranker_score_means_no_shortcut(self) -> None:
+        llm = MockLLMProvider(reply="Answer [S1].")
+        await _gated(llm, similarity=0.40, relevance=None).answer(_request())
+        assert len(llm.calls) == 1
+
+    async def test_disabled_means_every_question_is_asked(self) -> None:
+        llm = MockLLMProvider(reply="Answer [S1].")
+        await _gated(llm, similarity=0.40, relevance=0.01, bounds=None).answer(
+            _request()
+        )
+        assert len(llm.calls) == 1
+
+    async def test_streaming_takes_the_same_shortcut(self) -> None:
+        llm = MockLLMProvider(reply="Argentina [S1].")
+        service = _gated(llm, similarity=0.475, relevance=0.033)
+
+        tokens: list[str] = []
+        final = None
+        async for kind, value in service.stream(_request()):
+            if kind == "token":
+                tokens.append(str(value))
+            else:
+                final = value
+
+        assert "".join(tokens) == NO_CONTEXT_REPLY
+        assert final is not None
+        assert final.unsupported
+        assert llm.calls == []

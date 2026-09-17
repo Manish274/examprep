@@ -102,6 +102,15 @@ class Settings(BaseSettings):
     # off-topic ones; the near misses it does reach were still refused on
     # recheck. Only applies to a calibrated reranker.
     CHAT_RECHECK_MIN_RELEVANCE: float = 0.2
+    # A question whose best chunk scores below BOTH of these is answered as
+    # unsupported without a model call. Measured on the same deck: the lowest
+    # answerable question scored 0.548 similarity ("buzzer role") but 0.136
+    # relevance, and no answerable question was below both; 11 of 13 off-topic
+    # questions were ("Hi" and "Thanks!" pass through to the model, which
+    # refuses them anyway). The similarity bound is specific to the embedding
+    # model -- re-measure it if EMBEDDING_MODEL changes.
+    CHAT_OFF_TOPIC_MAX_SIMILARITY: float = 0.55
+    CHAT_OFF_TOPIC_MAX_RELEVANCE: float = 0.10
 
     # ── observability ────────────────────────────────────────
     TRACER: str = "postgres"

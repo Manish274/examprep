@@ -245,6 +245,23 @@ def recheck_threshold(settings: Settings, reranker: object) -> float | None:
     return settings.CHAT_RECHECK_MIN_RELEVANCE
 
 
+def off_topic_thresholds(
+    settings: Settings, reranker: object
+) -> tuple[float, float] | None:
+    """(similarity, relevance) bounds for skipping an off-topic question.
+
+    Needs a calibrated reranker too: with rank-derived scores the relevance
+    half of the test means nothing, and similarity alone overlaps between
+    terse real questions and small talk.
+    """
+    if not getattr(reranker, "calibrated", False):
+        return None
+    return (
+        settings.CHAT_OFF_TOPIC_MAX_SIMILARITY,
+        settings.CHAT_OFF_TOPIC_MAX_RELEVANCE,
+    )
+
+
 class Container:
     """Holds the wired pipeline and owns the lifetimes of its clients."""
 
@@ -292,6 +309,7 @@ class Container:
             history_turns=settings.CHAT_HISTORY_TURNS,
             history_tokens=settings.CHAT_HISTORY_MAX_TOKENS,
             recheck_min_relevance=recheck_threshold(settings, self.reranker),
+            off_topic_below=off_topic_thresholds(settings, self.reranker),
         )
 
     async def startup(self) -> None:
@@ -360,5 +378,6 @@ def build_test_container(settings: Settings) -> Container:
             history_turns=settings.CHAT_HISTORY_TURNS,
             history_tokens=settings.CHAT_HISTORY_MAX_TOKENS,
             recheck_min_relevance=recheck_threshold(settings, container.reranker),
+            off_topic_below=off_topic_thresholds(settings, container.reranker),
         )
     return container

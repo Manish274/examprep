@@ -10,6 +10,12 @@ Rewriting it against the conversation into a standalone question is what makes
 a follow-up work at all. It is skipped for the first message, where there is no
 history and the call would be pure latency.
 
+**Skipping the plainly off-topic.** Retrieval always returns something -- the
+nearest chunks exist whatever the question. When both the embedding similarity
+and the reranker's relevance say those chunks are unrelated, the question gets
+the no-material reply without a model call, saving a request from a small
+daily quota and the second or so it takes to be refused.
+
 **Rechecking a refusal.** A refusal is sampled like any other output, and the
 model sometimes declines a question whose answer is sitting in the top-ranked
 source. When the reranker says the evidence is strong and the model still
@@ -115,10 +121,32 @@ class _Attempt:
         return "".join(self.buffer).strip()
 
 
-def strongest_relevance(chunks: Sequence[ScoredChunk]) -> float | None:
-    """The best reranker relevance among the retrieved chunks, if there is one."""
-    scores = [c.rerank_score for c in chunks if c.rerank_score is not None]
-    return max(scores) if scores else None
+def _rounded(value: float | None) -> float | None:
+    return None if value is None else round(value, 4)
+
+
+@dataclass
+class Evidence:
+    """How strongly the retrieved material relates to the question.
+
+    Two signals, because neither is enough alone. Dense similarity is always
+    there but blurs on terse questions ("buzzer role" scored below "Hi");
+    reranker relevance reads the passage but spreads answerable questions
+    across almost its whole range. Where both are low, the question is not
+    about this material.
+    """
+
+    relevance: float | None = None
+    similarity: float | None = None
+
+    @classmethod
+    def of(cls, chunks: Sequence[ScoredChunk]) -> Evidence:
+        relevance = [c.rerank_score for c in chunks if c.rerank_score is not None]
+        similarity = [c.dense_score for c in chunks if c.dense_score is not None]
+        return cls(
+            relevance=max(relevance) if relevance else None,
+            similarity=max(similarity) if similarity else None,
+        )
 
 
 class ChatService:
@@ -132,6 +160,7 @@ class ChatService:
         history_turns: int = 8,
         history_tokens: int = 1500,
         recheck_min_relevance: float | None = None,
+        off_topic_below: tuple[float, float] | None = None,
     ) -> None:
         self._retrieval = retrieval
         self._context = context_builder
@@ -148,12 +177,27 @@ class ChatService:
         # whose scores are calibrated relevance; a rank-derived score says
         # nothing about whether the material covers the question.
         self._recheck_min_relevance = recheck_min_relevance
+        # (similarity, relevance). A question scoring below both is answered
+        # as unsupported without a model call. None disables it; it needs a
+        # calibrated reranker for the same reason the recheck does.
+        self._off_topic_below = off_topic_below
 
-    def _worth_rechecking(self, strongest: float | None) -> bool:
+    def _worth_rechecking(self, evidence: Evidence) -> bool:
         return (
             self._recheck_min_relevance is not None
-            and strongest is not None
-            and strongest >= self._recheck_min_relevance
+            and evidence.relevance is not None
+            and evidence.relevance >= self._recheck_min_relevance
+        )
+
+    def _off_topic(self, evidence: Evidence) -> bool:
+        if self._off_topic_below is None:
+            return False
+        if evidence.similarity is None or evidence.relevance is None:
+            return False
+        max_similarity, max_relevance = self._off_topic_below
+        return (
+            evidence.similarity < max_similarity
+            and evidence.relevance < max_relevance
         )
 
     async def condense(self, request: ChatRequest) -> str:
@@ -200,11 +244,12 @@ class ChatService:
 
     async def gather(
         self, request: ChatRequest
-    ) -> tuple[BuiltContext, str, dict[str, int], float | None]:
+    ) -> tuple[BuiltContext, str, dict[str, int], Evidence]:
         """Everything up to generation: condense, retrieve, build context.
 
-        Also returns the strongest reranker relevance, which is what decides
-        whether a refusal is worth a second look.
+        Also returns the evidence scores, which decide whether the question is
+        about this material at all and whether a refusal is worth a second
+        look.
         """
         timings: dict[str, int] = {}
 
@@ -226,6 +271,7 @@ class ChatService:
                 document_ids=request.document_ids,
                 top_k=request.top_k,
             )
+            evidence = Evidence.of(chunks)
             # The ids and scores are the whole point of a retrieval trace: an
             # answer that cited the wrong passage is diagnosed by looking at
             # what was ranked above the right one.
@@ -233,6 +279,9 @@ class ChatService:
                 returned=len(chunks),
                 chunk_ids=[c.chunk.id for c in chunks[:10]],
                 scores=[round(c.score, 4) for c in chunks[:10]],
+                similarity=_rounded(evidence.similarity),
+                relevance=_rounded(evidence.relevance),
+                off_topic=self._off_topic(evidence),
             )
         timings["retrieve_ms"] = int((time.perf_counter() - started) * 1000)
 
@@ -245,7 +294,25 @@ class ChatService:
             )
 
         timings["retrieved"] = len(chunks)
-        return context, query, timings, strongest_relevance(chunks)
+        return context, query, timings, evidence
+
+    def _no_answer(
+        self, query: str, timings: dict[str, int], evidence: Evidence
+    ) -> ChatResult:
+        """The reply when the model is not asked at all.
+
+        Either nothing was retrieved, or what was retrieved is plainly about
+        something else. Asking the model anyway costs a call from a small daily
+        quota to receive a refusal -- or invites exactly the ungrounded answer
+        this design refuses to give.
+        """
+        return ChatResult(
+            text=NO_CONTEXT_REPLY,
+            unsupported=True,
+            rewritten_query=query,
+            retrieved=timings.get("retrieved", 0),
+            timings=timings,
+        )
 
     def _messages(
         self, request: ChatRequest, context: BuiltContext, *, recheck: bool = False
@@ -309,18 +376,10 @@ class ChatService:
         )
 
     async def answer(self, request: ChatRequest) -> ChatResult:
-        context, query, timings, strongest = await self.gather(request)
+        context, query, timings, evidence = await self.gather(request)
 
-        if context.is_empty:
-            # Nothing retrieved. Asking the model anyway invites exactly the
-            # ungrounded answer this design refuses to give.
-            return ChatResult(
-                text=NO_CONTEXT_REPLY,
-                unsupported=True,
-                rewritten_query=query,
-                retrieved=0,
-                timings=timings,
-            )
+        if context.is_empty or self._off_topic(evidence):
+            return self._no_answer(query, timings, evidence)
 
         started = time.perf_counter()
         async with span(
@@ -336,7 +395,7 @@ class ChatService:
             completion_tokens = response.usage.completion_tokens
 
             rechecked = False
-            if is_refusal(response.text) and self._worth_rechecking(strongest):
+            if is_refusal(response.text) and self._worth_rechecking(evidence):
                 rechecked = True
                 response = await self._llm.complete(  # type: ignore[attr-defined]
                     self._messages(request, context, recheck=True),
@@ -404,17 +463,11 @@ class ChatService:
         verified against the sources: citations cannot be checked until the
         answer is complete.
         """
-        context, query, timings, strongest = await self.gather(request)
+        context, query, timings, evidence = await self.gather(request)
 
-        if context.is_empty:
+        if context.is_empty or self._off_topic(evidence):
             yield "token", NO_CONTEXT_REPLY
-            yield "done", ChatResult(
-                text=NO_CONTEXT_REPLY,
-                unsupported=True,
-                rewritten_query=query,
-                retrieved=0,
-                timings=timings,
-            )
+            yield "done", self._no_answer(query, timings, evidence)
             return
 
         started = time.perf_counter()
@@ -432,7 +485,7 @@ class ChatService:
         if (
             attempt.refused
             and not attempt.forwarded
-            and self._worth_rechecking(strongest)
+            and self._worth_rechecking(evidence)
         ):
             rechecked = True
             attempt = _Attempt()
