@@ -278,6 +278,10 @@ class Container:
             max_tokens=settings.CONTEXT_MAX_TOKENS,
             max_chunks=settings.CONTEXT_TOP_N,
         )
+        self.overview_context_builder = ContextBuilder(
+            max_tokens=settings.CHAT_OVERVIEW_MAX_TOKENS,
+            max_chunks=settings.CHAT_OVERVIEW_MAX_CHUNKS,
+        )
 
         self.qdrant = AsyncQdrantClient(
             url=settings.QDRANT_URL,
@@ -310,6 +314,8 @@ class Container:
             history_tokens=settings.CHAT_HISTORY_MAX_TOKENS,
             recheck_min_relevance=recheck_threshold(settings, self.reranker),
             off_topic_below=off_topic_thresholds(settings, self.reranker),
+            corpus=self.store,
+            overview_context_builder=self.overview_context_builder,
         )
 
     async def startup(self) -> None:
@@ -379,5 +385,7 @@ def build_test_container(settings: Settings) -> Container:
             history_tokens=settings.CHAT_HISTORY_MAX_TOKENS,
             recheck_min_relevance=recheck_threshold(settings, container.reranker),
             off_topic_below=off_topic_thresholds(settings, container.reranker),
+            corpus=container.store,
+            overview_context_builder=container.overview_context_builder,
         )
     return container

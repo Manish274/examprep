@@ -86,6 +86,11 @@ class Settings(BaseSettings):
     RERANK_TOP_N: int = 25
     CONTEXT_TOP_N: int = 8
     CONTEXT_MAX_TOKENS: int = 5000
+    # Questions about the whole document ("summarise my notes") are answered
+    # from an even spread of it rather than a search, and need more of it in
+    # view than a single fact does.
+    CHAT_OVERVIEW_MAX_CHUNKS: int = 24
+    CHAT_OVERVIEW_MAX_TOKENS: int = 12000
 
     # ── conversation ─────────────────────────────────────────
     # How much of the conversation the answering model is shown. Deliberately

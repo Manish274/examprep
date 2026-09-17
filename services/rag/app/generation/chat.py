@@ -25,6 +25,11 @@ the sources were judged relevant. The grounding rules are unchanged, so a
 question the material genuinely does not cover is still refused -- it has just
 cost one extra call, and only on that path.
 
+**Questions about the whole.** "Summarise my notes" or "what will I be tested
+on?" name no subject, so retrieval has nothing to match and the question would
+be refused. These are recognised by wording and answered from an even spread
+of the whole document instead (see `overview`).
+
 **Verification.** After generation, every marker the model emitted is resolved
 against the sources it was given. A model can write [S9] when three sources
 exist; rendering that would show the student a citation to material that was
@@ -44,6 +49,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 from app.core.models import (
+    Chunk,
     ExplanationMode,
     LLMMessage,
     RetrievalStrategy,
@@ -53,8 +59,10 @@ from app.core.models import (
 from app.generation.context import BuiltContext, verify_citations
 from app.generation.history import needs_context
 from app.generation.history import prepare as prepare_history
+from app.generation.overview import is_overview_question
 from app.generation.prompts import (
     NO_CONTEXT_REPLY,
+    OVERVIEW_RECHECK_NOTE,
     RECHECK_NOTE,
     UNSUPPORTED_REPLY,
     UNSUPPORTED_TOKEN,
@@ -62,6 +70,7 @@ from app.generation.prompts import (
     system_prompt,
     user_prompt,
 )
+from app.generation.study import spread, usable_chunks
 from app.observability.trace import current_trace, span
 
 logger = logging.getLogger(__name__)
@@ -140,6 +149,9 @@ class Evidence:
 
     relevance: float | None = None
     similarity: float | None = None
+    # The context is a sample of the whole document, not a search result, so
+    # there are no scores to judge it by -- and it is on topic by construction.
+    whole_document: bool = False
 
     @classmethod
     def of(cls, chunks: Sequence[ScoredChunk]) -> Evidence:
@@ -149,6 +161,29 @@ class Evidence:
             relevance=max(relevance) if relevance else None,
             similarity=max(similarity) if similarity else None,
         )
+
+
+def _spread_by_document(chunks: Sequence[Chunk], limit: int) -> list[Chunk]:
+    """An even sample across every document, each kept in reading order.
+
+    The budget is shared out by size, so one long PDF does not crowd a short
+    deck out of a summary of both.
+    """
+    by_document: dict[str, list[Chunk]] = {}
+    for chunk in chunks:
+        by_document.setdefault(chunk.metadata.document_id, []).append(chunk)
+
+    chosen: list[Chunk] = []
+    remaining = limit
+    groups = sorted(by_document.values(), key=len)
+    for index, group in enumerate(groups):
+        share = max(1, remaining // (len(groups) - index))
+        picked = spread(group, share)
+        chosen.extend(picked)
+        remaining -= len(picked)
+        if remaining <= 0:
+            break
+    return chosen
 
 
 class ChatService:
@@ -163,6 +198,9 @@ class ChatService:
         history_tokens: int = 1500,
         recheck_min_relevance: float | None = None,
         off_topic_below: tuple[float, float] | None = None,
+        corpus: object | None = None,
+        overview_context_builder: object | None = None,
+        overview_scan: int = 400,
     ) -> None:
         self._retrieval = retrieval
         self._context = context_builder
@@ -183,8 +221,17 @@ class ChatService:
         # as unsupported without a model call. None disables it; it needs a
         # calibrated reranker for the same reason the recheck does.
         self._off_topic_below = off_topic_below
+        # Reads a document's chunks back without a query, for questions about
+        # the whole of it. None sends those questions through retrieval.
+        self._corpus = corpus
+        self._overview_context = overview_context_builder or context_builder
+        self._overview_scan = overview_scan
 
     def _worth_rechecking(self, evidence: Evidence) -> bool:
+        if evidence.whole_document:
+            # The context is the document itself; a refusal there is the model
+            # declining to judge, not a sign the material is missing.
+            return True
         return (
             self._recheck_min_relevance is not None
             and evidence.relevance is not None
@@ -192,7 +239,7 @@ class ChatService:
         )
 
     def _off_topic(self, evidence: Evidence) -> bool:
-        if self._off_topic_below is None:
+        if self._off_topic_below is None or evidence.whole_document:
             return False
         if evidence.similarity is None or evidence.relevance is None:
             return False
@@ -259,9 +306,19 @@ class ChatService:
         """
         timings: dict[str, int] = {}
 
+        # Checked before condensing: such a question is already complete, and
+        # a rewrite would only add the conversation's subject words and send
+        # it to a search that cannot answer it.
+        if self._corpus is not None and is_overview_question(request.question):
+            timings["condense_ms"] = 0
+            return await self._gather_whole(request, request.question, timings)
+
         started = time.perf_counter()
         query = await self.condense(request)
         timings["condense_ms"] = int((time.perf_counter() - started) * 1000)
+
+        if self._corpus is not None and is_overview_question(query):
+            return await self._gather_whole(request, query, timings)
 
         started = time.perf_counter()
         async with span(
@@ -302,6 +359,42 @@ class ChatService:
         timings["retrieved"] = len(chunks)
         return context, query, timings, evidence
 
+    async def _gather_whole(
+        self, request: ChatRequest, query: str, timings: dict[str, int]
+    ) -> tuple[BuiltContext, str, dict[str, int], Evidence]:
+        """Context for a question about the material as a whole: an even
+        spread across every document in scope, in reading order."""
+        started = time.perf_counter()
+        builder = self._overview_context
+        async with span(
+            "sample_whole", query=query, scan=self._overview_scan
+        ) as observed:
+            chunks = await self._corpus.sample_chunks(  # type: ignore[union-attr]
+                user_id=request.user_id,
+                document_ids=request.document_ids,
+                limit=self._overview_scan,
+            )
+            # Scaffolding -- references, contents, credits -- says nothing
+            # about what is examinable. Kept only if it is all there is.
+            candidates = usable_chunks(chunks) or list(chunks)
+            chosen = _spread_by_document(
+                candidates,
+                builder.max_chunks,  # type: ignore[attr-defined]
+            )
+            context = builder.build(  # type: ignore[attr-defined]
+                [ScoredChunk(chunk=c, score=0.0) for c in chosen]
+            )
+            observed.output(
+                scanned=len(chunks),
+                usable=len(candidates),
+                sources=len(context.sources),
+                context_tokens=context.token_count,
+                dropped=context.dropped,
+            )
+        timings["retrieve_ms"] = int((time.perf_counter() - started) * 1000)
+        timings["retrieved"] = len(chosen)
+        return context, query, timings, Evidence(whole_document=True)
+
     def _no_answer(
         self, query: str, timings: dict[str, int], evidence: Evidence
     ) -> ChatResult:
@@ -321,7 +414,12 @@ class ChatService:
         )
 
     def _messages(
-        self, request: ChatRequest, context: BuiltContext, *, recheck: bool = False
+        self,
+        request: ChatRequest,
+        context: BuiltContext,
+        *,
+        recheck: bool = False,
+        overview: bool = False,
     ) -> list[LLMMessage]:
         """System prompt, then the conversation, then this question.
 
@@ -334,7 +432,12 @@ class ChatService:
         a search query, and answering it instead would drop the phrasing and
         emphasis the student chose.
         """
-        messages = [LLMMessage(role="system", content=system_prompt(request.mode))]
+        messages = [
+            LLMMessage(
+                role="system",
+                content=system_prompt(request.mode, overview=overview),
+            )
+        ]
 
         for turn in prepare_history(
             [(t.role, t.content) for t in request.history],
@@ -345,7 +448,8 @@ class ChatService:
 
         content = user_prompt(request.question, context.text)
         if recheck:
-            content = f"{content}\n\n{RECHECK_NOTE}"
+            note = OVERVIEW_RECHECK_NOTE if overview else RECHECK_NOTE
+            content = f"{content}\n\n{note}"
         messages.append(LLMMessage(role="user", content=content))
         return messages
 
@@ -395,7 +499,9 @@ class ChatService:
             sources=len(context.sources),
         ) as observed:
             response = await self._llm.complete(  # type: ignore[attr-defined]
-                self._messages(request, context), temperature=0.2, max_tokens=4000
+                self._messages(request, context, overview=evidence.whole_document),
+                temperature=0.2,
+                max_tokens=4000,
             )
             prompt_tokens = response.usage.prompt_tokens
             completion_tokens = response.usage.completion_tokens
@@ -404,7 +510,12 @@ class ChatService:
             if is_refusal(response.text) and self._worth_rechecking(evidence):
                 rechecked = True
                 response = await self._llm.complete(  # type: ignore[attr-defined]
-                    self._messages(request, context, recheck=True),
+                    self._messages(
+                        request,
+                        context,
+                        recheck=True,
+                        overview=evidence.whole_document,
+                    ),
                     temperature=0.0,
                     max_tokens=4000,
                 )
@@ -489,7 +600,9 @@ class ChatService:
 
         attempt = _Attempt()
         async for text in self._stream_attempt(
-            self._messages(request, context), 0.2, attempt
+            self._messages(request, context, overview=evidence.whole_document),
+            0.2,
+            attempt,
         ):
             yield "token", text
 
@@ -505,7 +618,14 @@ class ChatService:
             yield "stage", {"stage": "rechecking"}
             attempt = _Attempt()
             async for text in self._stream_attempt(
-                self._messages(request, context, recheck=True), 0.0, attempt
+                self._messages(
+                    request,
+                    context,
+                    recheck=True,
+                    overview=evidence.whole_document,
+                ),
+                0.0,
+                attempt,
             ):
                 yield "token", text
 

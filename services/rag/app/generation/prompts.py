@@ -68,8 +68,40 @@ Be complete but compact -- no preamble, no restating the question, no filler."""
 }
 
 
-def system_prompt(mode: ExplanationMode) -> str:
-    return f"{_GROUNDING}\n\n{_MODES[mode]}"
+_OVERVIEW = f"""This question is about the material as a whole, and the sources
+below are a spread across all of it rather than passages matched to the
+question.
+
+Questions like "what is most likely to be tested", "what is the hardest idea"
+or "summarise this" ask you to judge the material, and the material will never
+state the answer outright. That is expected: the judgment is yours to make,
+and making it is the task. Base it on the sources -- what they spend the most
+space on, what they define, list or explain step by step, which part has the
+most moving pieces, what the other parts depend on. Pick one answer, say in a
+sentence what the choice rests on, and present it as a judgment ("the idea
+with the most steps in your notes is..."), not as a certainty.
+
+Then answer it: summarise, explain or list the chosen material from the
+sources. Every fact you mention still needs a citation, and you still may not
+add anything the sources do not say. Do not reply {UNSUPPORTED_TOKEN} to a
+question like this while there are sources below."""
+
+
+OVERVIEW_RECHECK_NOTE = (
+    "The sources above are a spread of the student's whole document. The "
+    "question asks for your judgment about that material, which it will not "
+    "state outright. Make the judgment from the sources, say what it rests "
+    "on, and answer from them with citations. Do not reply "
+    f"{UNSUPPORTED_TOKEN}."
+)
+"""Appended when a question about the whole document was refused anyway."""
+
+
+def system_prompt(mode: ExplanationMode, *, overview: bool = False) -> str:
+    parts = [_GROUNDING, _MODES[mode]]
+    if overview:
+        parts.append(_OVERVIEW)
+    return "\n\n".join(parts)
 
 
 def user_prompt(question: str, context: str) -> str:
