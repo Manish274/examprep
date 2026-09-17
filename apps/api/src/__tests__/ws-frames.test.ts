@@ -49,7 +49,6 @@ describe("websocket frame ordering", () => {
 
     const token = await signAccessToken({
       sub: "2a1f9c34-5b6d-4e78-9012-3456789abcde",
-      email: "student@example.test",
       sid: "5c3e1d2a-7b8c-4d9e-8f01-23456789abcd",
     });
 

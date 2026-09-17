@@ -10,16 +10,15 @@ import {
 } from "react";
 import {
   getSession,
-  login as loginRequest,
   logout as logoutRequest,
   onSessionChange,
-  register as registerRequest,
   setSession,
+  start as startRequest,
   type Session,
 } from "./api";
 
 /**
- * Who is signed in.
+ * Who is here: the name typed on the start screen, and the visit's tokens.
  *
  * The session lives in module state rather than only in React state, because
  * the HTTP client needs it outside any component -- including inside the
@@ -32,8 +31,9 @@ interface AuthValue {
   session: Session | null;
   /** False until the stored session has been read; the first paint is unknown. */
   loaded: boolean;
-  signIn: (email: string, password: string) => Promise<void>;
-  signUp: (email: string, password: string) => Promise<void>;
+  /** Starts a new visit under this name. */
+  start: (name: string) => Promise<void>;
+  /** Ends the visit; its uploads and chats are deleted. */
   signOut: () => Promise<void>;
 }
 
@@ -55,12 +55,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     () => false,
   );
 
-  const signIn = useCallback(async (email: string, password: string) => {
-    setSession(await loginRequest(email, password));
-  }, []);
-
-  const signUp = useCallback(async (email: string, password: string) => {
-    setSession(await registerRequest(email, password));
+  const start = useCallback(async (name: string) => {
+    setSession(await startRequest(name));
   }, []);
 
   const signOut = useCallback(async () => {
@@ -68,8 +64,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const value = useMemo<AuthValue>(
-    () => ({ session, loaded, signIn, signUp, signOut }),
-    [session, loaded, signIn, signUp, signOut],
+    () => ({ session, loaded, start, signOut }),
+    [session, loaded, start, signOut],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

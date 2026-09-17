@@ -13,62 +13,22 @@ beforeAll(() => {
   });
 });
 
-describe("password hashing", () => {
-  it("verifies a correct password", async () => {
-    const { hashPassword, verifyPassword } = await import("../lib/auth.js");
-    const hash = await hashPassword("correct horse battery staple");
-    expect(await verifyPassword(hash, "correct horse battery staple")).toBe(true);
-  });
-
-  it("rejects an incorrect password", async () => {
-    const { hashPassword, verifyPassword } = await import("../lib/auth.js");
-    const hash = await hashPassword("correct horse battery staple");
-    expect(await verifyPassword(hash, "wrong password")).toBe(false);
-  });
-
-  it("produces a different hash each time", async () => {
-    // Argon2 salts per call. Identical hashes would mean the salt is missing
-    // and the whole table becomes one rainbow-table lookup.
-    const { hashPassword } = await import("../lib/auth.js");
-    const [a, b] = await Promise.all([
-      hashPassword("same password"),
-      hashPassword("same password"),
-    ]);
-    expect(a).not.toBe(b);
-  });
-
-  it("treats a corrupt stored hash as a failed login", async () => {
-    // Must not throw: a crash here would distinguish a corrupt record from a
-    // wrong password.
-    const { verifyPassword } = await import("../lib/auth.js");
-    expect(await verifyPassword("not-a-real-hash", "anything")).toBe(false);
-  });
-});
-
 describe("access tokens", () => {
   it("round-trips its claims", async () => {
     const { signAccessToken, verifyAccessToken } = await import("../lib/auth.js");
-    const token = await signAccessToken({
-      sub: "user-123",
-      email: "student@example.com",
-      sid: "session-9",
-    });
+    const token = await signAccessToken({ sub: "user-123", sid: "session-9" });
     const claims = await verifyAccessToken(token);
 
-    expect(claims).toEqual({
-      sub: "user-123",
-      email: "student@example.com",
-      sid: "session-9",
-    });
+    expect(claims).toEqual({ sub: "user-123", sid: "session-9" });
   });
 
-  it("rejects a token that names no sign-in", async () => {
-    // Issued before sessions were tracked: it could reach nothing, so the
-    // student is sent to log in again rather than shown an empty workspace
+  it("rejects a token that names no visit", async () => {
+    // Issued before visits were tracked: it could reach nothing, so the
+    // student is sent back to the start rather than shown an empty workspace
     // that silently fails.
     const { SignJWT } = await import("jose");
     const { verifyAccessToken } = await import("../lib/auth.js");
-    const token = await new SignJWT({ email: "a@b.c" })
+    const token = await new SignJWT({})
       .setProtectedHeader({ alg: "HS256" })
       .setSubject("user-1")
       .setIssuedAt()
@@ -80,11 +40,7 @@ describe("access tokens", () => {
 
   it("rejects a tampered token", async () => {
     const { signAccessToken, verifyAccessToken } = await import("../lib/auth.js");
-    const token = await signAccessToken({
-      sub: "user-1",
-      email: "a@b.c",
-      sid: "s-1",
-    });
+    const token = await signAccessToken({ sub: "user-1", sid: "s-1" });
     const tampered = `${token.slice(0, -4)}AAAA`;
 
     expect(await verifyAccessToken(tampered)).toBeNull();
@@ -101,7 +57,7 @@ describe("access tokens", () => {
 
     // Signed here rather than through signAccessToken because the TTL is read
     // from a cached environment, so it cannot be varied per test.
-    const expired = await new SignJWT({ email: "a@b.c" })
+    const expired = await new SignJWT({ sid: "s-1" })
       .setProtectedHeader({ alg: "HS256" })
       .setSubject("user-1")
       .setIssuedAt(Math.floor(Date.now() / 1000) - 7200)
@@ -115,7 +71,7 @@ describe("access tokens", () => {
     const { verifyAccessToken } = await import("../lib/auth.js");
     const { SignJWT } = await import("jose");
 
-    const forged = await new SignJWT({ email: "a@b.c" })
+    const forged = await new SignJWT({ sid: "s-1" })
       .setProtectedHeader({ alg: "HS256" })
       .setSubject("user-1")
       .setIssuedAt()

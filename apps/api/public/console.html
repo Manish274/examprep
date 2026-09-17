@@ -179,10 +179,8 @@
   </p>
   <div class="card">
     <div class="row">
-      <div class="field"><label for="email">Email</label><input id="email" type="email" autocomplete="username" style="width:240px" /></div>
-      <div class="field"><label for="password">Password</label><input id="password" type="password" autocomplete="current-password" style="width:180px" /></div>
-      <button class="act" id="login">Sign in</button>
-      <button class="act ghost" id="register">Register</button>
+      <div class="field"><label for="name">Name</label><input id="name" type="text" maxlength="60" autocomplete="given-name" style="width:240px" /></div>
+      <button class="act" id="start">Get started</button>
     </div>
     <div class="err" id="auth-err"></div>
   </div>
@@ -539,11 +537,11 @@ async function checkHealth() {
 $("refresh-health").addEventListener("click", checkHealth);
 
 // ── auth ───────────────────────────────────────────────────
-async function authenticate(path) {
+async function start() {
   showError("auth-err", null);
   try {
-    const body = JSON.stringify({ email: $("email").value.trim(), password: $("password").value });
-    const result = await api(`/api/auth/${path}`, { method: "POST", body });
+    const body = JSON.stringify({ name: $("name").value.trim() });
+    const result = await api("/api/auth/start", { method: "POST", body });
     S.token = result.accessToken;
     S.refreshToken = result.refreshToken;
     S.user = result.user;
@@ -553,9 +551,19 @@ async function authenticate(path) {
     showError("auth-err", err);
   }
 }
-$("login").addEventListener("click", () => authenticate("login"));
-$("register").addEventListener("click", () => authenticate("register"));
+$("start").addEventListener("click", start);
+$("name").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") void start();
+});
 $("logout").addEventListener("click", () => {
+  // Ends the visit on the server too, which deletes its uploads.
+  if (S.refreshToken) {
+    void fetch("/api/auth/logout", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ refreshToken: S.refreshToken }),
+    }).catch(() => {});
+  }
   S.token = S.refreshToken = S.user = null;
   S.ws?.close();
   persist();
@@ -564,7 +572,7 @@ $("logout").addEventListener("click", () => {
 });
 
 function onSignedIn() {
-  $("who").textContent = S.user?.email || "signed in";
+  $("who").textContent = S.user?.name || "signed in";
   $("logout").hidden = false;
   connectSocket();
   void loadDocuments();

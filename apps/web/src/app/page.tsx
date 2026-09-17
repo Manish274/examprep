@@ -114,12 +114,7 @@ export default function LandingPage() {
           </a>
         </nav>
         <div style={{ display: "flex", alignItems: "center", gap: "var(--space-4)" }}>
-          <Link href="/signin">
-            <Button variant="ghost" size="sm">
-              Sign in
-            </Button>
-          </Link>
-          <Link href="/signin?mode=register">
+          <Link href="/start">
             <Button variant="paper" size="sm" caps>
               Get started
             </Button>
@@ -215,7 +210,7 @@ export default function LandingPage() {
               marginTop: "var(--space-2)",
             }}
           >
-            <Link href="/signin?mode=register">
+            <Link href="/start">
               <Button variant="paper" size="lg" caps>
                 Get started
               </Button>
@@ -582,7 +577,7 @@ export default function LandingPage() {
                 alignItems: "flex-start",
               }}
             >
-              <Link href="/signin?mode=register">
+              <Link href="/start">
                 <Button variant="primary" size="lg" icon={ArrowUp}>
                   Upload your notes
                 </Button>
@@ -631,9 +626,6 @@ export default function LandingPage() {
             <a href="#sources" style={{ color: "var(--text-muted)" }}>
               Sources
             </a>
-            <Link href="/signin" style={{ color: "var(--text-muted)" }}>
-              Sign in
-            </Link>
           </div>
           <span style={MONO_META}>Dark theme only</span>
         </div>

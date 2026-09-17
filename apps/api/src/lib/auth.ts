@@ -1,39 +1,18 @@
-import { hash, verify } from "@node-rs/argon2";
 import { SignJWT, jwtVerify } from "jose";
 import { createHash, randomBytes } from "node:crypto";
 import { env } from "../env.js";
 
 /**
- * Argon2id parameters. OWASP's current floor is 19 MiB and one iteration; this
- * doubles the memory, which costs a few tens of milliseconds per login and
- * meaningfully raises the cost of an offline attack on a stolen dump.
+ * Tokens for a visit.
+ *
+ * There are no passwords: a student types a name and starts. The tokens are
+ * still what keeps one visitor's uploads and chats away from another's -- an
+ * id in a request proves nothing, a signed token does.
  */
-const ARGON2_OPTIONS = {
-  memoryCost: 39_936,
-  timeCost: 2,
-  parallelism: 1,
-} as const;
-
-export const hashPassword = (password: string): Promise<string> =>
-  hash(password, ARGON2_OPTIONS);
-
-export async function verifyPassword(
-  storedHash: string,
-  password: string,
-): Promise<boolean> {
-  try {
-    return await verify(storedHash, password, ARGON2_OPTIONS);
-  } catch {
-    // A malformed hash must read as a failed login, never as a crash that
-    // distinguishes "no such user" from "corrupt record".
-    return false;
-  }
-}
 
 export interface AccessTokenClaims {
   sub: string;
-  email: string;
-  /** The sign-in this token belongs to; everything it touches is scoped by it. */
+  /** The visit this token belongs to; everything it touches is scoped by it. */
   sid: string;
 }
 
@@ -43,7 +22,7 @@ export async function signAccessToken(
   claims: AccessTokenClaims,
 ): Promise<string> {
   const { JWT_ACCESS_SECRET, ACCESS_TOKEN_TTL } = env();
-  return new SignJWT({ email: claims.email, sid: claims.sid })
+  return new SignJWT({ sid: claims.sid })
     .setProtectedHeader({ alg: "HS256" })
     .setSubject(claims.sub)
     .setIssuedAt()
@@ -60,14 +39,13 @@ export async function verifyAccessToken(
     });
     if (
       typeof payload.sub !== "string" ||
-      typeof payload.email !== "string" ||
-      // A token from before sign-ins were tracked names no session, and so
-      // could reach nothing. Refusing it sends the student to log in again.
+      // A token from before visits were tracked names none, and so could
+      // reach nothing. Refusing it sends the student back to the start.
       typeof payload.sid !== "string"
     ) {
       return null;
     }
-    return { sub: payload.sub, email: payload.email, sid: payload.sid };
+    return { sub: payload.sub, sid: payload.sid };
   } catch {
     // Expired, tampered, or wrong algorithm — all are simply "not authenticated".
     return null;

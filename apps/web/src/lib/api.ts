@@ -18,7 +18,7 @@ import { API_URL } from "./config";
 export interface Session {
   accessToken: string;
   refreshToken: string;
-  user: { id: string; email: string };
+  user: { id: string; name: string };
 }
 
 const STORAGE_KEY = "examprep.session";
@@ -32,10 +32,13 @@ export function getSession(): Session | null {
   if (typeof window === "undefined") return null;
   try {
     const saved = window.localStorage.getItem(STORAGE_KEY);
-    session = saved ? (JSON.parse(saved) as Session) : null;
+    const parsed = saved ? (JSON.parse(saved) as Session) : null;
+    // A session saved by the old email sign-in has no name, and its tokens
+    // name no visit the API still accepts. Starting again is the only way on.
+    session = typeof parsed?.user?.name === "string" ? parsed : null;
   } catch {
     // A corrupt entry must not stop the app from loading; it only means
-    // signing in again.
+    // starting again.
     session = null;
   }
   return session;
@@ -163,17 +166,11 @@ export async function request<T>(
 
 // ── auth ───────────────────────────────────────────────────
 
-export const login = (email: string, password: string) =>
-  request<Session>("/api/auth/login", {
+/** Begins a visit under a name. There are no accounts to sign in to. */
+export const start = (name: string) =>
+  request<Session>("/api/auth/start", {
     method: "POST",
-    body: { email, password },
-    anonymous: true,
-  });
-
-export const register = (email: string, password: string, displayName?: string) =>
-  request<Session>("/api/auth/register", {
-    method: "POST",
-    body: { email, password, ...(displayName ? { displayName } : {}) },
+    body: { name },
     anonymous: true,
   });
 

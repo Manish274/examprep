@@ -1,32 +1,35 @@
 import { Hono } from "hono";
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { z } from "zod";
 import { refreshTokens, users } from "@examprep/db";
 import { validate } from "../lib/validate.js";
 import { db } from "../lib/db.js";
 import {
   generateRefreshToken,
-  hashPassword,
   hashRefreshToken,
   refreshTokenExpiry,
   signAccessToken,
-  verifyPassword,
 } from "../lib/auth.js";
-import { conflict, unauthorized } from "../lib/errors.js";
-import {
-  endLoginSession,
-  purgeUnscoped,
-  startLoginSession,
-} from "../lib/login-sessions.js";
+import { unauthorized } from "../lib/errors.js";
+import { endLoginSession, startLoginSession } from "../lib/login-sessions.js";
 import { logger } from "../lib/logger.js";
 import { disconnectLoginSession } from "../ws/hub.js";
 import { requireAuth, currentUserId } from "../middleware/auth.js";
 import type { AppEnv } from "../types.js";
 
-const credentialsSchema = z.object({
-  email: z.string().email().max(320),
-  password: z.string().min(8).max(200),
-  displayName: z.string().min(1).max(120).optional(),
+/**
+ * Starting and ending a visit.
+ *
+ * No accounts: a name is all a student gives, and each start is a new user
+ * with an empty workspace. Two students who type the same name are two
+ * different users -- a name identifies nobody, so it must not unlock anything.
+ */
+
+const startSchema = z.object({
+  name: z
+    .string()
+    .transform((value) => value.replace(/\s+/g, " ").trim())
+    .pipe(z.string().min(1, "Enter your name").max(60)),
 });
 
 const refreshSchema = z.object({
@@ -35,13 +38,11 @@ const refreshSchema = z.object({
 
 async function issueTokens(
   userId: string,
-  email: string,
   loginSessionId: string,
   userAgent?: string,
 ) {
   const accessToken = await signAccessToken({
     sub: userId,
-    email,
     sid: loginSessionId,
   });
   const { token, tokenHash } = generateRefreshToken();
@@ -60,81 +61,27 @@ async function issueTokens(
 }
 
 export const authRoutes = new Hono<AppEnv>()
-  .post("/register", validate("json", credentialsSchema), async (c) => {
-    const { email, password, displayName } = c.req.valid("json");
-
-    const existing = await db()
-      .select({ id: users.id })
-      .from(users)
-      .where(sql`lower(${users.email}) = lower(${email})`)
-      .limit(1);
-
-    if (existing.length > 0) {
-      throw conflict("An account with that email already exists");
-    }
+  .post("/start", validate("json", startSchema), async (c) => {
+    const { name } = c.req.valid("json");
 
     const [created] = await db()
       .insert(users)
-      .values({
-        email,
-        passwordHash: await hashPassword(password),
-        displayName: displayName ?? null,
-      })
-      .returning({ id: users.id, email: users.email });
+      .values({ displayName: name })
+      .returning({ id: users.id, name: users.displayName });
 
     if (!created) {
-      throw new Error("Failed to create user");
+      throw new Error("Failed to start");
     }
 
     const tokens = await issueTokens(
       created.id,
-      created.email,
       await startLoginSession(created.id),
       c.req.header("user-agent"),
     );
-    return c.json({ user: created, ...tokens }, 201);
-  })
-
-  .post("/login", validate("json", credentialsSchema.omit({ displayName: true })), async (c) => {
-    const { email, password } = c.req.valid("json");
-
-    const [found] = await db()
-      .select({
-        id: users.id,
-        email: users.email,
-        passwordHash: users.passwordHash,
-      })
-      .from(users)
-      .where(sql`lower(${users.email}) = lower(${email})`)
-      .limit(1);
-
-    // Hash even when no user matched, so response time does not reveal
-    // whether an email is registered.
-    const ok = found
-      ? await verifyPassword(found.passwordHash, password)
-      : await verifyPassword("$argon2id$v=19$m=39936,t=2,p=1$AAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", password);
-
-    if (!found || !ok) {
-      throw unauthorized("Incorrect email or password");
-    }
-
-    // Every login is a fresh start. Material from before sessions were
-    // tracked has nothing to expire with, so it goes now. Other sign-ins that
-    // are still live -- another device -- keep theirs until they end.
-    await purgeUnscoped(found.id).catch((err: unknown) => {
-      logger.error({ err, userId: found.id }, "failed to clear old material");
-    });
-
-    const tokens = await issueTokens(
-      found.id,
-      found.email,
-      await startLoginSession(found.id),
-      c.req.header("user-agent"),
+    return c.json(
+      { user: { id: created.id, name: created.name ?? name }, ...tokens },
+      201,
     );
-    return c.json({
-      user: { id: found.id, email: found.email },
-      ...tokens,
-    });
   })
 
   .post("/refresh", validate("json", refreshSchema), async (c) => {
@@ -161,23 +108,12 @@ export const authRoutes = new Hono<AppEnv>()
       throw unauthorized("Invalid or expired refresh token");
     }
 
-    const [user] = await db()
-      .select({ id: users.id, email: users.email })
-      .from(users)
-      .where(eq(users.id, stored.userId))
-      .limit(1);
-
-    if (!user) {
-      throw unauthorized("Account no longer exists");
-    }
-
     // Rotate: the presented token is retired as the replacement is issued, so
     // a stolen refresh token is usable at most once. The replacement is
     // written first, so the session is never without a live token for the
     // sweep to mistake for an abandoned one.
     const tokens = await issueTokens(
-      user.id,
-      user.email,
+      stored.userId,
       stored.loginSessionId,
       c.req.header("user-agent"),
     );
@@ -196,12 +132,12 @@ export const authRoutes = new Hono<AppEnv>()
       .where(eq(refreshTokens.tokenHash, hashRefreshToken(c.req.valid("json").refreshToken)))
       .returning({ loginSessionId: refreshTokens.loginSessionId });
 
-    // Signing out ends the session, and its uploads and chats go with it.
+    // Leaving ends the visit, and its uploads and chats go with it.
     if (stored?.loginSessionId) {
       disconnectLoginSession(stored.loginSessionId);
       await endLoginSession(stored.loginSessionId).catch((err: unknown) => {
         // Already unusable; the sweep finishes removing what is left.
-        logger.error({ err }, "failed to clear a signed-out session");
+        logger.error({ err }, "failed to clear an ended session");
       });
     }
 
@@ -214,8 +150,7 @@ export const authRoutes = new Hono<AppEnv>()
     const [user] = await db()
       .select({
         id: users.id,
-        email: users.email,
-        displayName: users.displayName,
+        name: users.displayName,
         createdAt: users.createdAt,
       })
       .from(users)
@@ -223,7 +158,7 @@ export const authRoutes = new Hono<AppEnv>()
       .limit(1);
 
     if (!user) {
-      throw unauthorized("Account no longer exists");
+      throw unauthorized("Session has ended");
     }
     return c.json({ user });
   });

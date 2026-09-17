@@ -1,17 +1,18 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Button, Display, Wordmark } from "@/ds";
 import { useAuth } from "@/lib/auth";
 import { ApiError } from "@/lib/api";
 
 /**
- * Sign in and registration, on one screen.
+ * The way in: a name and a button.
  *
- * Two surfaces exist in this product and this is the second; there is nothing
- * to see signed out, so the page is the gate rather than a step inside one.
+ * There are no accounts. Each start is a new visit with an empty workspace,
+ * and ending it deletes what was uploaded -- so there is nothing a password
+ * would be protecting between visits.
  */
 
 const FIELD: React.CSSProperties = {
@@ -35,14 +36,14 @@ const LABEL: React.CSSProperties = {
   color: "var(--text-faint)",
 };
 
-function SignInForm() {
-  const params = useSearchParams();
-  const router = useRouter();
-  const { session, loaded, signIn, signUp } = useAuth();
+/** Mirrors the API's limit, so the field stops where the server would. */
+const MAX_NAME = 60;
 
-  const [registering, setRegistering] = useState(params.get("mode") === "register");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+export default function StartPage() {
+  const router = useRouter();
+  const { session, loaded, start } = useAuth();
+
+  const [name, setName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -50,24 +51,22 @@ function SignInForm() {
     if (loaded && session) router.replace("/study");
   }, [loaded, session, router]);
 
+  const trimmed = name.trim();
+
   async function submit(event: React.FormEvent) {
     event.preventDefault();
+    if (!trimmed) return;
     setError(null);
     setBusy(true);
     try {
-      if (registering) await signUp(email.trim(), password);
-      else await signIn(email.trim(), password);
+      await start(trimmed);
       router.replace("/study");
     } catch (err) {
-      // The API's own message is the useful one -- "Incorrect email or
-      // password", "An account with that email already exists" -- so it is
-      // shown rather than replaced with something generic.
       setError(
         err instanceof ApiError
           ? err.message
           : "Could not reach Examprep. Is the API running?",
       );
-    } finally {
       setBusy(false);
     }
   }
@@ -111,8 +110,8 @@ function SignInForm() {
         <Display
           as="h1"
           size="md"
-          serif={registering ? "start with the one" : "pick up where"}
-          sans={registering ? "lecture you dread" : "you left off"}
+          serif="start with the one"
+          sans="lecture you dread"
         />
 
         <form
@@ -120,37 +119,23 @@ function SignInForm() {
           style={{ display: "flex", flexDirection: "column", gap: "var(--space-7)" }}
         >
           <label style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
-            <span style={LABEL}>Email</span>
+            <span style={LABEL}>Your name</span>
             <input
-              type="email"
+              type="text"
               required
-              autoComplete="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              autoFocus
+              autoComplete="given-name"
+              maxLength={MAX_NAME}
+              placeholder="What should we call you?"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
               style={FIELD}
             />
-          </label>
-
-          <label style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
-            <span style={LABEL}>Password</span>
-            <input
-              type="password"
-              required
-              minLength={8}
-              autoComplete={registering ? "new-password" : "current-password"}
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              style={FIELD}
-            />
-            {registering ? (
-              <span style={{ fontSize: "var(--text-xs)", color: "var(--text-muted)" }}>
-                At least 8 characters.
-              </span>
-            ) : null}
           </label>
 
           {error ? (
             <p
+              role="alert"
               style={{
                 margin: 0,
                 fontSize: "var(--text-sm)",
@@ -167,43 +152,24 @@ function SignInForm() {
             size="lg"
             caps
             fullWidth
-            disabled={busy}
+            disabled={busy || !trimmed}
           >
-            {busy ? "One moment" : registering ? "Create account" : "Sign in"}
+            {busy ? "One moment" : "Get started"}
           </Button>
         </form>
 
-        <button
-          type="button"
-          onClick={() => {
-            setRegistering((was) => !was);
-            setError(null);
-          }}
+        <p
           style={{
-            background: "transparent",
-            border: "none",
-            padding: 0,
-            cursor: "pointer",
-            textAlign: "left",
-            fontFamily: "var(--font-sans)",
+            margin: 0,
             fontSize: "var(--text-sm)",
+            lineHeight: 1.5,
             color: "var(--text-muted)",
           }}
         >
-          {registering
-            ? "Already have an account? Sign in"
-            : "New here? Create an account"}
-        </button>
+          No account needed. Each visit starts fresh, and ending it deletes
+          anything you uploaded.
+        </p>
       </div>
     </main>
-  );
-}
-
-export default function SignInPage() {
-  // useSearchParams needs a suspense boundary for static rendering.
-  return (
-    <Suspense fallback={null}>
-      <SignInForm />
-    </Suspense>
   );
 }

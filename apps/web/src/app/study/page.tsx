@@ -68,7 +68,7 @@ export default function StudyPage() {
   const salutation = greeting(new Date().getHours());
 
   useEffect(() => {
-    if (loaded && !session) router.replace("/signin");
+    if (loaded && !session) router.replace("/start");
   }, [loaded, session, router]);
 
   useEffect(() => {
@@ -76,7 +76,8 @@ export default function StudyPage() {
   }, [chat.turns.length, chat.streaming]);
 
   const name = useMemo(
-    () => session?.user.email.split("@")[0] ?? "there",
+    // First word only: "Morning, Priya" rather than the whole of what was typed.
+    () => session?.user.name.split(" ")[0] || "there",
     [session],
   );
 
@@ -211,7 +212,7 @@ export default function StudyPage() {
           setMode("chat");
           chat.startNew();
         }}
-        email={session.user.email}
+        name={session.user.name}
         onSignOut={async () => {
           await signOut();
           router.replace("/");

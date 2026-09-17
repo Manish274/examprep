@@ -1,12 +1,5 @@
 import { and, eq, gt, inArray, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
-import {
-  chatSessions,
-  documents,
-  flashcardSets,
-  loginSessions,
-  refreshTokens,
-  tests,
-} from "@examprep/db";
+import { documents, loginSessions, refreshTokens, users } from "@examprep/db";
 import { db } from "./db.js";
 import { logger } from "./logger.js";
 import { documents as documentQueue } from "./queue.js";
@@ -14,12 +7,13 @@ import { ragDeleteDocument } from "./rag-client.js";
 import { storage } from "./storage.js";
 
 /**
- * The lifetime of a sign-in, and of everything made during it.
+ * The lifetime of a visit, and of everything made during it.
  *
- * A student's uploads, chats, quizzes and flashcards belong to the sign-in
- * they were made in. When it ends -- by signing out, or by its refresh tokens
- * lapsing unused -- all of it is removed: the stored file, the vectors, and
- * the rows. The next login starts from nothing.
+ * A student types a name and starts; that is a visit (a login_sessions row,
+ * named "sign-in" throughout the code). Its uploads, chats, quizzes and
+ * flashcards belong to it. When it ends -- by leaving, or by its refresh
+ * tokens lapsing unused -- all of it is removed: the stored file, the
+ * vectors, the rows, and the visitor. The next start begins from nothing.
  *
  * Removal is not left to the database alone. Rows cascade from the session,
  * but the file on disk and the vectors in Qdrant do not, and vectors left
@@ -102,7 +96,25 @@ export async function purgeLoginSession(id: string): Promise<void> {
 
   // Everything else -- chats across all documents, refresh tokens -- cascades
   // from the session row.
-  await db().delete(loginSessions).where(eq(loginSessions.id, id));
+  const [ended] = await db()
+    .delete(loginSessions)
+    .where(eq(loginSessions.id, id))
+    .returning({ userId: loginSessions.userId });
+
+  // A visitor is only a name for the length of one visit. Once it is over
+  // nothing can sign back in as them, so the row goes too -- unless it is an
+  // account from before names replaced passwords.
+  if (ended) {
+    await db()
+      .delete(users)
+      .where(
+        and(
+          eq(users.id, ended.userId),
+          isNull(users.email),
+          sql`not exists (select 1 from login_sessions where user_id = ${ended.userId})`,
+        ),
+      );
+  }
   logger.info({ loginSessionId: id, documents: owned.length }, "session cleared");
 }
 
@@ -124,36 +136,6 @@ export async function endLoginSession(id: string): Promise<void> {
       and(eq(refreshTokens.loginSessionId, id), isNull(refreshTokens.revokedAt)),
     );
   await purgeLoginSession(id);
-}
-
-/**
- * Material from before sessions existed has no sign-in to expire with, so it
- * is cleared the next time its owner logs in.
- */
-export async function purgeUnscoped(userId: string): Promise<void> {
-  const orphans = await db()
-    .select({
-      id: documents.id,
-      userId: documents.userId,
-      storageKey: documents.storageKey,
-    })
-    .from(documents)
-    .where(and(eq(documents.userId, userId), isNull(documents.loginSessionId)));
-
-  await removeDocuments(orphans);
-
-  const unscoped = (table: typeof chatSessions | typeof tests | typeof flashcardSets) =>
-    db()
-      .delete(table)
-      .where(and(eq(table.userId, userId), isNull(table.loginSessionId)));
-  await unscoped(chatSessions);
-  await unscoped(tests);
-  await unscoped(flashcardSets);
-  await db()
-    .delete(refreshTokens)
-    .where(
-      and(eq(refreshTokens.userId, userId), isNull(refreshTokens.loginSessionId)),
-    );
 }
 
 /**

@@ -72,12 +72,18 @@ export const attemptStatusEnum = pgEnum("attempt_status", [
 // Identity
 // ─────────────────────────────────────────────────────────────
 
+/**
+ * Someone using the app. There are no accounts: a student types a name and
+ * starts, and each start is a new user whose material lives only as long as
+ * that visit. Email and password survive only on rows from before that change.
+ */
 export const users = pgTable(
   "users",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    email: varchar("email", { length: 320 }).notNull(),
-    passwordHash: text("password_hash").notNull(),
+    email: varchar("email", { length: 320 }),
+    passwordHash: text("password_hash"),
+    /** The name typed on the start screen. */
     displayName: varchar("display_name", { length: 120 }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()

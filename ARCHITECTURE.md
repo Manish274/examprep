@@ -59,8 +59,12 @@ Hybrid: PyMuPDF for PDF, python-pptx for PPT/PPTX. Docling is kept as a second
 the eval harness rather than assumed better.
 
 ### 3.5 Node data layer and auth
-Drizzle ORM. Email/password with argon2, short-lived access JWT plus refresh
-tokens persisted in Postgres, and an explicit authenticated WebSocket handshake.
+Drizzle ORM. No accounts: a student types a name and starts a visit (a
+`login_sessions` row). Every upload, chat, quiz and card belongs to that visit,
+and ending it -- or letting its refresh tokens lapse -- deletes them, the
+stored files, the vectors and the visitor. Short-lived access JWTs carry the
+visit id, refresh tokens are persisted in Postgres, and the WebSocket has an
+explicit authenticated handshake.
 
 ### 3.6 Observability
 A `Tracer` abstraction with a local Postgres-backed implementation capturing

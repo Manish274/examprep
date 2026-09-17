@@ -15,7 +15,7 @@ import type { StudyMode } from "./modes";
 
 /**
  * The left rail: wordmark, the three destinations, a new-chat action beneath
- * them, the chat history, and an account row pinned to the bottom.
+ * them, the chat history, and the student's name pinned to the bottom.
  *
  * Collapsible. It slides out rather than unmounting, so the transition is one
  * width animation and the scroll position of the history survives being hidden.
@@ -30,7 +30,7 @@ export function Rail({
   activeSessionId,
   onOpenSession,
   onNewChat,
-  email,
+  name,
   onSignOut,
   documentCount,
 }: {
@@ -42,7 +42,7 @@ export function Rail({
   activeSessionId: string | null;
   onOpenSession: (id: string) => void;
   onNewChat: () => void;
-  email: string;
+  name: string;
   onSignOut: () => void;
   documentCount: number;
 }) {
@@ -188,7 +188,7 @@ export function Rail({
                 textTransform: "uppercase",
               }}
             >
-              {email.slice(0, 1)}
+              {name.slice(0, 1)}
             </span>
             <span style={{ flex: 1, minWidth: 0 }}>
               <span
@@ -201,7 +201,7 @@ export function Rail({
                   whiteSpace: "nowrap",
                 }}
               >
-                {email}
+                {name}
               </span>
               <span
                 style={{
@@ -214,7 +214,12 @@ export function Rail({
                 {documentCount} {documentCount === 1 ? "document" : "documents"}
               </span>
             </span>
-            <IconButton icon={LogOut} label="Sign out" size={28} onClick={onSignOut} />
+            <IconButton
+              icon={LogOut}
+              label="End session (deletes your uploads)"
+              size={28}
+              onClick={onSignOut}
+            />
           </div>
         </div>
       </div>
