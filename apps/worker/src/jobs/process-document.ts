@@ -6,7 +6,11 @@ import type { DocumentProcessingJob } from "@examprep/shared";
 import { db } from "../lib/db.js";
 import { logger } from "../lib/logger.js";
 import { overallPercent, publishProgress } from "../lib/progress.js";
-import { ingest, RagPermanentError } from "../lib/rag-client.js";
+import {
+  deleteVectors,
+  ingest,
+  RagPermanentError,
+} from "../lib/rag-client.js";
 
 /**
  * Runs one document through ingestion.
@@ -75,6 +79,20 @@ export async function processDocument(
       },
       "parsed, embedded and indexed",
     );
+
+    // The student may have signed out while this ran, and their upload been
+    // deleted. The vectors were written regardless; left there, they would
+    // outlive everything that points at them.
+    const [stillWanted] = await db()
+      .select({ id: documents.id })
+      .from(documents)
+      .where(eq(documents.id, documentId))
+      .limit(1);
+    if (!stillWanted) {
+      await deleteVectors({ documentId, userId }, { correlationId: job.id });
+      log.info("document removed during processing; vectors dropped");
+      return;
+    }
 
     await setStatus("chunking", { pageCount: result.page_count });
     await report("chunking", 1, 1, `${result.chunk_count} chunks`);

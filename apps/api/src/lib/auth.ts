@@ -33,6 +33,8 @@ export async function verifyPassword(
 export interface AccessTokenClaims {
   sub: string;
   email: string;
+  /** The sign-in this token belongs to; everything it touches is scoped by it. */
+  sid: string;
 }
 
 const secret = (value: string): Uint8Array => new TextEncoder().encode(value);
@@ -41,7 +43,7 @@ export async function signAccessToken(
   claims: AccessTokenClaims,
 ): Promise<string> {
   const { JWT_ACCESS_SECRET, ACCESS_TOKEN_TTL } = env();
-  return new SignJWT({ email: claims.email })
+  return new SignJWT({ email: claims.email, sid: claims.sid })
     .setProtectedHeader({ alg: "HS256" })
     .setSubject(claims.sub)
     .setIssuedAt()
@@ -56,10 +58,16 @@ export async function verifyAccessToken(
     const { payload } = await jwtVerify(token, secret(env().JWT_ACCESS_SECRET), {
       algorithms: ["HS256"],
     });
-    if (typeof payload.sub !== "string" || typeof payload.email !== "string") {
+    if (
+      typeof payload.sub !== "string" ||
+      typeof payload.email !== "string" ||
+      // A token from before sign-ins were tracked names no session, and so
+      // could reach nothing. Refusing it sends the student to log in again.
+      typeof payload.sid !== "string"
+    ) {
       return null;
     }
-    return { sub: payload.sub, email: payload.email };
+    return { sub: payload.sub, email: payload.email, sid: payload.sid };
   } catch {
     // Expired, tampered, or wrong algorithm — all are simply "not authenticated".
     return null;

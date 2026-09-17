@@ -51,15 +51,40 @@ describe("access tokens", () => {
     const token = await signAccessToken({
       sub: "user-123",
       email: "student@example.com",
+      sid: "session-9",
     });
     const claims = await verifyAccessToken(token);
 
-    expect(claims).toEqual({ sub: "user-123", email: "student@example.com" });
+    expect(claims).toEqual({
+      sub: "user-123",
+      email: "student@example.com",
+      sid: "session-9",
+    });
+  });
+
+  it("rejects a token that names no sign-in", async () => {
+    // Issued before sessions were tracked: it could reach nothing, so the
+    // student is sent to log in again rather than shown an empty workspace
+    // that silently fails.
+    const { SignJWT } = await import("jose");
+    const { verifyAccessToken } = await import("../lib/auth.js");
+    const token = await new SignJWT({ email: "a@b.c" })
+      .setProtectedHeader({ alg: "HS256" })
+      .setSubject("user-1")
+      .setIssuedAt()
+      .setExpirationTime("5m")
+      .sign(new TextEncoder().encode("a".repeat(32)));
+
+    expect(await verifyAccessToken(token)).toBeNull();
   });
 
   it("rejects a tampered token", async () => {
     const { signAccessToken, verifyAccessToken } = await import("../lib/auth.js");
-    const token = await signAccessToken({ sub: "user-1", email: "a@b.c" });
+    const token = await signAccessToken({
+      sub: "user-1",
+      email: "a@b.c",
+      sid: "s-1",
+    });
     const tampered = `${token.slice(0, -4)}AAAA`;
 
     expect(await verifyAccessToken(tampered)).toBeNull();

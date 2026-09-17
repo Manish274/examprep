@@ -9,6 +9,7 @@ import { closeDb } from "./lib/db.js";
 import { closeRedis } from "./lib/redis.js";
 import { closeQueues } from "./lib/queue.js";
 import { closeHub, createHandlers } from "./ws/hub.js";
+import { startSessionSweeper } from "./lib/login-sessions.js";
 
 const env = loadEnv();
 
@@ -31,9 +32,14 @@ const server = serve(
 
 injectWebSocket(server);
 
+// Clears sign-ins that ended without a sign-out -- a closed tab whose tokens
+// have since lapsed -- along with their uploads.
+const stopSweeper = startSessionSweeper();
+
 async function shutdown(signal: string): Promise<void> {
   logger.info({ signal }, "shutting down");
   server.close();
+  stopSweeper();
   await Promise.allSettled([closeHub(), closeQueues(), closeDb(), closeRedis()]);
   process.exit(0);
 }

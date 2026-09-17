@@ -17,7 +17,15 @@ import { Redis } from "ioredis";
 import { db } from "../lib/db.js";
 import { logger } from "../lib/logger.js";
 import { verifyAccessToken } from "../lib/auth.js";
-import { ragChatStream, type ChatSource } from "../lib/rag-client.js";
+import {
+  isLoginSessionLive,
+  sessionDocumentIds,
+} from "../lib/login-sessions.js";
+import {
+  ragChatStream,
+  type ChatSource,
+  type ChatStreamEvent,
+} from "../lib/rag-client.js";
 import { env } from "../env.js";
 
 /**
@@ -30,6 +38,8 @@ import { env } from "../env.js";
 interface Connection {
   socket: WSContext;
   userId: string | null;
+  /** The sign-in the connection authenticated as; chats are scoped by it. */
+  loginSessionId: string | null;
   /** Documents this connection wants progress for. */
   watching: Set<string>;
   /** Tests and flashcard sets this connection wants progress for. */
@@ -229,12 +239,29 @@ export function deriveTitle(question: string, maxLength = 60): string {
   return `${(lastSpace > maxLength * 0.6 ? cut.slice(0, lastSpace) : cut).trimEnd()}…`;
 }
 
+export const NOTHING_UPLOADED_REPLY =
+  "There is nothing uploaded in this session yet. Add a PDF or slide deck " +
+  "with the + and ask again -- answers only come from your own material.";
+
+/**
+ * The answer when a session has no ready material.
+ *
+ * Answered here rather than by the RAG service: it reads an empty document list
+ * as no filter at all, which would search every upload the student has ever
+ * made -- including other sign-ins' -- instead of none.
+ */
+async function* nothingUploaded(): AsyncGenerator<ChatStreamEvent> {
+  yield { type: "token", delta: NOTHING_UPLOADED_REPLY };
+  yield { type: "done", unsupported: true, retrieved: 0, rewrittenQuery: null };
+}
+
 async function handleChat(
   connection: Connection,
   event: Extract<ClientEvent, { type: "chat:send" }>,
 ): Promise<void> {
   const userId = connection.userId;
-  if (!userId) return;
+  const loginSessionId = connection.loginSessionId;
+  if (!userId || !loginSessionId) return;
 
   const [session] = await db()
     .select({
@@ -246,9 +273,10 @@ async function handleChat(
     .where(
       and(
         eq(chatSessions.id, event.sessionId),
-        // Scoped by owner: a session id alone must not reach another
-        // student's conversation.
+        // Scoped by sign-in: a chat id alone must not reach another
+        // student's conversation, or one from an earlier visit.
         eq(chatSessions.userId, userId),
+        eq(chatSessions.loginSessionId, loginSessionId),
       ),
     )
     .limit(1);
@@ -259,6 +287,12 @@ async function handleChat(
   }
 
   const history = await loadHistory(session.id);
+
+  // A chat over "everything" means everything uploaded in this sign-in. The
+  // RAG service scopes by user alone, so the documents are named here.
+  const documentIds = session.documentId
+    ? [session.documentId]
+    : await sessionDocumentIds(loginSessionId);
 
   await db().insert(messages).values({
     sessionId: session.id,
@@ -312,16 +346,20 @@ async function handleChat(
   let rewritten: string | null = null;
 
   try {
-    for await (const chunk of ragChatStream(
-      {
-        question: event.content,
-        userId,
-        mode: event.mode,
-        documentIds: session.documentId ? [session.documentId] : null,
-        history,
-      },
-      { correlationId: assistant.id, signal: controller.signal },
-    )) {
+    const stream =
+      documentIds.length === 0
+        ? nothingUploaded()
+        : ragChatStream(
+            {
+              question: event.content,
+              userId,
+              mode: event.mode,
+              documentIds,
+              history,
+            },
+            { correlationId: assistant.id, signal: controller.signal },
+          );
+    for await (const chunk of stream) {
       if (chunk.type === "stage") {
         send(connection.socket, {
           type: "chat:stage",
@@ -421,12 +459,13 @@ async function dispatch(
 ): Promise<void> {
   if (event.type === "auth") {
     const claims = await verifyAccessToken(event.token);
-    if (!claims) {
+    if (!claims || !(await isLoginSessionLive(claims.sid))) {
       fail(connection.socket, "unauthorized", "Invalid or expired token");
       connection.socket.close(1008, "unauthorized");
       return;
     }
     connection.userId = claims.sub;
+    connection.loginSessionId = claims.sid;
     if (connection.authTimer) {
       clearTimeout(connection.authTimer);
       connection.authTimer = null;
@@ -475,6 +514,7 @@ export function createHandlers() {
       const connection: Connection = {
         socket: ws,
         userId: null,
+        loginSessionId: null,
         watching: new Set(),
         watchingGeneration: new Set(),
         abort: null,
@@ -540,6 +580,18 @@ export function createHandlers() {
       connections.delete(ws);
     },
   };
+}
+
+/**
+ * Drops every socket belonging to a sign-in that has just ended, so an open
+ * tab stops streaming answers from material that is being deleted.
+ */
+export function disconnectLoginSession(loginSessionId: string): void {
+  for (const connection of connections.values()) {
+    if (connection.loginSessionId !== loginSessionId) continue;
+    connection.abort?.abort();
+    connection.socket.close(1008, "session ended");
+  }
 }
 
 export async function closeHub(): Promise<void> {

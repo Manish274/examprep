@@ -2,7 +2,15 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { validate } from "../lib/validate.js";
 import { ragRetrieve, type RagRetrievedChunk } from "../lib/rag-client.js";
-import { currentUserId, requireAuth } from "../middleware/auth.js";
+import {
+  currentLoginSessionId,
+  currentUserId,
+  requireAuth,
+} from "../middleware/auth.js";
+import {
+  filterSessionDocuments,
+  sessionDocumentIds,
+} from "../lib/login-sessions.js";
 import type { AppEnv } from "../types.js";
 
 /**
@@ -49,6 +57,16 @@ export const retrievalRoutes = new Hono<AppEnv>()
   .post("/search", validate("json", searchSchema), async (c) => {
     const userId = currentUserId(c);
     const { query, documentIds, topK, strategies } = c.req.valid("json");
+    const loginSessionId = currentLoginSessionId(c);
+
+    // The service scopes by user alone. Naming the documents is what keeps a
+    // search inside this sign-in's uploads.
+    const scope = documentIds
+      ? await filterSessionDocuments(loginSessionId, documentIds)
+      : await sessionDocumentIds(loginSessionId);
+    if (scope.length === 0) {
+      return c.json({ query, topK, strategies: [] });
+    }
 
     // Sequential rather than concurrent: every strategy but bm25 makes a
     // rate-limited embedding call, and four at once against a free tier is a
@@ -61,7 +79,7 @@ export const retrievalRoutes = new Hono<AppEnv>()
           query,
           userId,
           strategy,
-          documentIds: documentIds ?? null,
+          documentIds: scope,
           topK,
         });
         outcomes.push({

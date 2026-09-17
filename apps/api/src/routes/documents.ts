@@ -16,7 +16,11 @@ import {
   payloadTooLarge,
   unprocessable,
 } from "../lib/errors.js";
-import { currentUserId, requireAuth } from "../middleware/auth.js";
+import {
+  currentLoginSessionId,
+  currentUserId,
+  requireAuth,
+} from "../middleware/auth.js";
 import { env } from "../env.js";
 import type { AppEnv } from "../types.js";
 
@@ -39,6 +43,7 @@ export const documentRoutes = new Hono<AppEnv>()
    */
   .post("/", async (c) => {
     const userId = currentUserId(c);
+    const loginSessionId = currentLoginSessionId(c);
     const { MAX_UPLOAD_BYTES } = env();
 
     const form = await c.req.formData().catch(() => null);
@@ -77,7 +82,7 @@ export const documentRoutes = new Hono<AppEnv>()
       .from(documents)
       .where(
         and(
-          eq(documents.userId, userId),
+          eq(documents.loginSessionId, loginSessionId),
           eq(documents.contentHash, contentHash),
         ),
       )
@@ -105,6 +110,7 @@ export const documentRoutes = new Hono<AppEnv>()
       .insert(documents)
       .values({
         userId,
+        loginSessionId,
         filename: file.name || `upload.${EXTENSION_FOR_KIND[kind]}`,
         kind,
         storageKey: "",
@@ -156,7 +162,7 @@ export const documentRoutes = new Hono<AppEnv>()
   })
 
   .get("/", validate("query", listQuerySchema), async (c) => {
-    const userId = currentUserId(c);
+    const loginSessionId = currentLoginSessionId(c);
     const { limit, before } = c.req.valid("query");
 
     const rows = await db()
@@ -176,10 +182,10 @@ export const documentRoutes = new Hono<AppEnv>()
       .where(
         before
           ? and(
-              eq(documents.userId, userId),
+              eq(documents.loginSessionId, loginSessionId),
               lt(documents.createdAt, new Date(before)),
             )
-          : eq(documents.userId, userId),
+          : eq(documents.loginSessionId, loginSessionId),
       )
       .orderBy(desc(documents.createdAt))
       .limit(limit);
@@ -198,8 +204,9 @@ export const documentRoutes = new Hono<AppEnv>()
       .where(
         and(
           eq(documents.id, c.req.valid("param").id),
-          // Scoping every query by owner is what actually enforces isolation.
-          eq(documents.userId, currentUserId(c)),
+          // Scoping every query by sign-in is what actually enforces
+          // isolation -- between students, and between one student's visits.
+          eq(documents.loginSessionId, currentLoginSessionId(c)),
         ),
       )
       .limit(1);
@@ -212,13 +219,15 @@ export const documentRoutes = new Hono<AppEnv>()
 
   /** The chunks a document produced. Useful for inspecting ingestion quality. */
   .get("/:id/chunks", validate("param", idParamSchema), async (c) => {
-    const userId = currentUserId(c);
     const documentId = c.req.valid("param").id;
 
     const [owned] = await db()
       .select({ id: documents.id })
       .from(documents)
-      .where(and(eq(documents.id, documentId), eq(documents.userId, userId)))
+      .where(and(
+          eq(documents.id, documentId),
+          eq(documents.loginSessionId, currentLoginSessionId(c)),
+        ),)
       .limit(1);
 
     if (!owned) {
@@ -241,7 +250,10 @@ export const documentRoutes = new Hono<AppEnv>()
     const [row] = await db()
       .select({ id: documents.id, storageKey: documents.storageKey })
       .from(documents)
-      .where(and(eq(documents.id, documentId), eq(documents.userId, userId)))
+      .where(and(
+          eq(documents.id, documentId),
+          eq(documents.loginSessionId, currentLoginSessionId(c)),
+        ),)
       .limit(1);
 
     if (!row) {

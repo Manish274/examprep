@@ -7,7 +7,11 @@ import { validate } from "../lib/validate.js";
 import { study } from "../lib/queue.js";
 import { logger } from "../lib/logger.js";
 import { conflict, notFound } from "../lib/errors.js";
-import { currentUserId, requireAuth } from "../middleware/auth.js";
+import {
+  currentLoginSessionId,
+  currentUserId,
+  requireAuth,
+} from "../middleware/auth.js";
 import type { AppEnv } from "../types.js";
 
 const createSchema = z.object({
@@ -32,7 +36,7 @@ export const flashcardRoutes = new Hono<AppEnv>()
         status: documents.status,
       })
       .from(documents)
-      .where(and(eq(documents.id, documentId), eq(documents.userId, userId)))
+      .where(and(eq(documents.id, documentId), eq(documents.loginSessionId, currentLoginSessionId(c))))
       .limit(1);
 
     if (!document) {
@@ -48,6 +52,7 @@ export const flashcardRoutes = new Hono<AppEnv>()
       .insert(flashcardSets)
       .values({
         userId,
+        loginSessionId: currentLoginSessionId(c),
         documentId,
         title: title ?? `Flashcards for ${document.filename}`,
         status: "pending",
@@ -90,7 +95,7 @@ export const flashcardRoutes = new Hono<AppEnv>()
     const rows = await db()
       .select()
       .from(flashcardSets)
-      .where(eq(flashcardSets.userId, currentUserId(c)))
+      .where(eq(flashcardSets.loginSessionId, currentLoginSessionId(c)))
       .orderBy(desc(flashcardSets.createdAt))
       .limit(50);
 
@@ -98,13 +103,12 @@ export const flashcardRoutes = new Hono<AppEnv>()
   })
 
   .get("/:id", validate("param", idParamSchema), async (c) => {
-    const userId = currentUserId(c);
     const setId = c.req.valid("param").id;
 
     const [set] = await db()
       .select()
       .from(flashcardSets)
-      .where(and(eq(flashcardSets.id, setId), eq(flashcardSets.userId, userId)))
+      .where(and(eq(flashcardSets.id, setId), eq(flashcardSets.loginSessionId, currentLoginSessionId(c))))
       .limit(1);
 
     if (!set) {
@@ -123,13 +127,12 @@ export const flashcardRoutes = new Hono<AppEnv>()
   })
 
   .delete("/:id", validate("param", idParamSchema), async (c) => {
-    const userId = currentUserId(c);
     const setId = c.req.valid("param").id;
 
     const [set] = await db()
       .select({ id: flashcardSets.id })
       .from(flashcardSets)
-      .where(and(eq(flashcardSets.id, setId), eq(flashcardSets.userId, userId)))
+      .where(and(eq(flashcardSets.id, setId), eq(flashcardSets.loginSessionId, currentLoginSessionId(c))))
       .limit(1);
 
     if (!set) {

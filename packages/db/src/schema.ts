@@ -90,6 +90,29 @@ export const users = pgTable(
 );
 
 /**
+ * One sign-in, from login until sign-out or until its refresh tokens lapse.
+ *
+ * Everything a student makes -- uploads, chats, quizzes, flashcards -- belongs
+ * to the sign-in it was made in, and goes when that sign-in ends. Each login
+ * starts from nothing: the product keeps no library between visits.
+ */
+export const loginSessions = pgTable(
+  "login_sessions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** Set on sign-out. The row stays until its material has been removed. */
+    endedAt: timestamp("ended_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [index("login_sessions_user_idx").on(t.userId)],
+);
+
+/**
  * Refresh tokens are persisted so they can be revoked. Only the hash is stored
  * — a database leak must not hand out live sessions.
  */
@@ -100,6 +123,11 @@ export const refreshTokens = pgTable(
     userId: uuid("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
+    /** Rotation keeps this, so every token in a chain names one sign-in. */
+    loginSessionId: uuid("login_session_id").references(
+      () => loginSessions.id,
+      { onDelete: "cascade" },
+    ),
     tokenHash: text("token_hash").notNull(),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
     revokedAt: timestamp("revoked_at", { withTimezone: true }),
@@ -125,6 +153,10 @@ export const documents = pgTable(
     userId: uuid("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
+    loginSessionId: uuid("login_session_id").references(
+      () => loginSessions.id,
+      { onDelete: "cascade" },
+    ),
     filename: text("filename").notNull(),
     kind: documentKindEnum("kind").notNull(),
     /** Opaque key resolved by the active StorageProvider. */
@@ -149,7 +181,13 @@ export const documents = pgTable(
   (t) => [
     index("documents_user_idx").on(t.userId),
     index("documents_status_idx").on(t.status),
-    uniqueIndex("documents_user_hash_unique").on(t.userId, t.contentHash),
+    index("documents_login_session_idx").on(t.loginSessionId),
+    // Per sign-in: the same file uploaded again in a later session is a new
+    // upload, not a duplicate of something already gone.
+    uniqueIndex("documents_session_hash_unique").on(
+      t.loginSessionId,
+      t.contentHash,
+    ),
   ],
 );
 
@@ -231,7 +269,11 @@ export const chatSessions = pgTable(
     userId: uuid("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    /** Null means the session spans every ready document the user owns. */
+    loginSessionId: uuid("login_session_id").references(
+      () => loginSessions.id,
+      { onDelete: "cascade" },
+    ),
+    /** Null means the chat spans every ready document in its sign-in. */
     documentId: uuid("document_id").references(() => documents.id, {
       onDelete: "cascade",
     }),
@@ -243,7 +285,10 @@ export const chatSessions = pgTable(
       .notNull()
       .defaultNow(),
   },
-  (t) => [index("chat_sessions_user_idx").on(t.userId)],
+  (t) => [
+    index("chat_sessions_user_idx").on(t.userId),
+    index("chat_sessions_login_session_idx").on(t.loginSessionId),
+  ],
 );
 
 export const messages = pgTable(
@@ -303,6 +348,10 @@ export const tests = pgTable(
     documentId: uuid("document_id")
       .notNull()
       .references(() => documents.id, { onDelete: "cascade" }),
+    loginSessionId: uuid("login_session_id").references(
+      () => loginSessions.id,
+      { onDelete: "cascade" },
+    ),
     title: text("title").notNull(),
     status: generationStatusEnum("status").notNull().default("pending"),
     questionCount: integer("question_count").notNull().default(0),
@@ -316,7 +365,10 @@ export const tests = pgTable(
       .notNull()
       .defaultNow(),
   },
-  (t) => [index("tests_user_idx").on(t.userId)],
+  (t) => [
+    index("tests_user_idx").on(t.userId),
+    index("tests_login_session_idx").on(t.loginSessionId),
+  ],
 );
 
 export const testQuestions = pgTable(
@@ -410,6 +462,10 @@ export const flashcardSets = pgTable(
     documentId: uuid("document_id")
       .notNull()
       .references(() => documents.id, { onDelete: "cascade" }),
+    loginSessionId: uuid("login_session_id").references(
+      () => loginSessions.id,
+      { onDelete: "cascade" },
+    ),
     title: text("title").notNull(),
     status: generationStatusEnum("status").notNull().default("pending"),
     cardCount: integer("card_count").notNull().default(0),
@@ -421,7 +477,10 @@ export const flashcardSets = pgTable(
       .notNull()
       .defaultNow(),
   },
-  (t) => [index("flashcard_sets_user_idx").on(t.userId)],
+  (t) => [
+    index("flashcard_sets_user_idx").on(t.userId),
+    index("flashcard_sets_login_session_idx").on(t.loginSessionId),
+  ],
 );
 
 export const flashcards = pgTable(
@@ -493,6 +552,7 @@ export const usersRelations = relations(users, ({ many }) => ({
   tests: many(tests),
   flashcardSets: many(flashcardSets),
   refreshTokens: many(refreshTokens),
+  loginSessions: many(loginSessions),
 }));
 
 export const documentsRelations = relations(documents, ({ one, many }) => ({

@@ -2,6 +2,7 @@
 export interface AppVariables {
   requestId: string;
   userId?: string;
+  loginSessionId?: string;
 }
 
 export type AppEnv = { Variables: AppVariables };

@@ -11,7 +11,11 @@ import {
 import { db } from "../lib/db.js";
 import { validate } from "../lib/validate.js";
 import { notFound } from "../lib/errors.js";
-import { currentUserId, requireAuth } from "../middleware/auth.js";
+import {
+  currentLoginSessionId,
+  currentUserId,
+  requireAuth,
+} from "../middleware/auth.js";
 import type { AppEnv } from "../types.js";
 
 const createSessionSchema = z.object({
@@ -39,7 +43,12 @@ export const chatRoutes = new Hono<AppEnv>()
       const [owned] = await db()
         .select({ id: documents.id })
         .from(documents)
-        .where(and(eq(documents.id, documentId), eq(documents.userId, userId)))
+        .where(
+          and(
+            eq(documents.id, documentId),
+            eq(documents.loginSessionId, currentLoginSessionId(c)),
+          ),
+        )
         .limit(1);
       if (!owned) {
         throw notFound("Document");
@@ -50,6 +59,7 @@ export const chatRoutes = new Hono<AppEnv>()
       .insert(chatSessions)
       .values({
         userId,
+        loginSessionId: currentLoginSessionId(c),
         documentId: documentId ?? null,
         title: title ?? null,
       })
@@ -62,7 +72,8 @@ export const chatRoutes = new Hono<AppEnv>()
     const rows = await db()
       .select()
       .from(chatSessions)
-      .where(eq(chatSessions.userId, currentUserId(c)))
+      // Only this sign-in's chats: each login starts with an empty sidebar.
+      .where(eq(chatSessions.loginSessionId, currentLoginSessionId(c)))
       .orderBy(desc(chatSessions.updatedAt))
       .limit(50);
 
@@ -76,7 +87,7 @@ export const chatRoutes = new Hono<AppEnv>()
       .where(
         and(
           eq(chatSessions.id, c.req.valid("param").id),
-          eq(chatSessions.userId, currentUserId(c)),
+          eq(chatSessions.loginSessionId, currentLoginSessionId(c)),
         ),
       )
       .limit(1);
@@ -88,14 +99,13 @@ export const chatRoutes = new Hono<AppEnv>()
   })
 
   .get("/sessions/:id/messages", validate("param", idParamSchema), async (c) => {
-    const userId = currentUserId(c);
     const sessionId = c.req.valid("param").id;
 
     const [session] = await db()
       .select({ id: chatSessions.id })
       .from(chatSessions)
       .where(
-        and(eq(chatSessions.id, sessionId), eq(chatSessions.userId, userId)),
+        and(eq(chatSessions.id, sessionId), eq(chatSessions.loginSessionId, currentLoginSessionId(c))),
       )
       .limit(1);
 
@@ -167,14 +177,13 @@ export const chatRoutes = new Hono<AppEnv>()
   })
 
   .delete("/sessions/:id", validate("param", idParamSchema), async (c) => {
-    const userId = currentUserId(c);
     const sessionId = c.req.valid("param").id;
 
     const [session] = await db()
       .select({ id: chatSessions.id })
       .from(chatSessions)
       .where(
-        and(eq(chatSessions.id, sessionId), eq(chatSessions.userId, userId)),
+        and(eq(chatSessions.id, sessionId), eq(chatSessions.loginSessionId, currentLoginSessionId(c))),
       )
       .limit(1);
 

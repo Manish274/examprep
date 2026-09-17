@@ -208,6 +208,17 @@ async function post<T>(
   }
 }
 
+/** Drops a document's vectors from the index. */
+export const deleteVectors = (
+  request: { documentId: string; userId: string },
+  options?: { correlationId?: string },
+): Promise<{ document_id: string; removed: number }> =>
+  post(
+    "/documents/delete",
+    { document_id: request.documentId, user_id: request.userId },
+    { timeoutMs: 30_000, ...options },
+  );
+
 export const generateTest = (
   request: {
     userId: string;

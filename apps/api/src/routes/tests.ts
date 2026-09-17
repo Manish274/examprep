@@ -15,7 +15,11 @@ import { study } from "../lib/queue.js";
 import { gradeAnswers } from "../lib/rag-client.js";
 import { logger } from "../lib/logger.js";
 import { badRequest, conflict, notFound } from "../lib/errors.js";
-import { currentUserId, requireAuth } from "../middleware/auth.js";
+import {
+  currentLoginSessionId,
+  currentUserId,
+  requireAuth,
+} from "../middleware/auth.js";
 import type { AppEnv } from "../types.js";
 
 const createSchema = z.object({
@@ -61,7 +65,7 @@ export const testRoutes = new Hono<AppEnv>()
         status: documents.status,
       })
       .from(documents)
-      .where(and(eq(documents.id, documentId), eq(documents.userId, userId)))
+      .where(and(eq(documents.id, documentId), eq(documents.loginSessionId, currentLoginSessionId(c))))
       .limit(1);
 
     if (!document) {
@@ -79,6 +83,7 @@ export const testRoutes = new Hono<AppEnv>()
       .insert(tests)
       .values({
         userId,
+        loginSessionId: currentLoginSessionId(c),
         documentId,
         title: title ?? `Test on ${document.filename}`,
         status: "pending",
@@ -125,7 +130,7 @@ export const testRoutes = new Hono<AppEnv>()
     const rows = await db()
       .select()
       .from(tests)
-      .where(eq(tests.userId, currentUserId(c)))
+      .where(eq(tests.loginSessionId, currentLoginSessionId(c)))
       .orderBy(desc(tests.createdAt))
       .limit(50);
 
@@ -140,13 +145,12 @@ export const testRoutes = new Hono<AppEnv>()
    * browser before the test is taken.
    */
   .get("/:id", validate("param", idParamSchema), async (c) => {
-    const userId = currentUserId(c);
     const testId = c.req.valid("param").id;
 
     const [test] = await db()
       .select()
       .from(tests)
-      .where(and(eq(tests.id, testId), eq(tests.userId, userId)))
+      .where(and(eq(tests.id, testId), eq(tests.loginSessionId, currentLoginSessionId(c))))
       .limit(1);
 
     if (!test) {
@@ -175,7 +179,7 @@ export const testRoutes = new Hono<AppEnv>()
     const [test] = await db()
       .select({ id: tests.id, status: tests.status, count: tests.questionCount })
       .from(tests)
-      .where(and(eq(tests.id, testId), eq(tests.userId, userId)))
+      .where(and(eq(tests.id, testId), eq(tests.loginSessionId, currentLoginSessionId(c))))
       .limit(1);
 
     if (!test) {
@@ -356,13 +360,12 @@ export const testRoutes = new Hono<AppEnv>()
   })
 
   .delete("/:id", validate("param", idParamSchema), async (c) => {
-    const userId = currentUserId(c);
     const testId = c.req.valid("param").id;
 
     const [test] = await db()
       .select({ id: tests.id })
       .from(tests)
-      .where(and(eq(tests.id, testId), eq(tests.userId, userId)))
+      .where(and(eq(tests.id, testId), eq(tests.loginSessionId, currentLoginSessionId(c))))
       .limit(1);
 
     if (!test) {

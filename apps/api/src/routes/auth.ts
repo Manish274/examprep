@@ -13,6 +13,13 @@ import {
   verifyPassword,
 } from "../lib/auth.js";
 import { conflict, unauthorized } from "../lib/errors.js";
+import {
+  endLoginSession,
+  purgeUnscoped,
+  startLoginSession,
+} from "../lib/login-sessions.js";
+import { logger } from "../lib/logger.js";
+import { disconnectLoginSession } from "../ws/hub.js";
 import { requireAuth, currentUserId } from "../middleware/auth.js";
 import type { AppEnv } from "../types.js";
 
@@ -26,14 +33,24 @@ const refreshSchema = z.object({
   refreshToken: z.string().min(1),
 });
 
-async function issueTokens(userId: string, email: string, userAgent?: string) {
-  const accessToken = await signAccessToken({ sub: userId, email });
+async function issueTokens(
+  userId: string,
+  email: string,
+  loginSessionId: string,
+  userAgent?: string,
+) {
+  const accessToken = await signAccessToken({
+    sub: userId,
+    email,
+    sid: loginSessionId,
+  });
   const { token, tokenHash } = generateRefreshToken();
 
   await db()
     .insert(refreshTokens)
     .values({
       userId,
+      loginSessionId,
       tokenHash,
       expiresAt: refreshTokenExpiry(),
       userAgent: userAgent ?? null,
@@ -72,6 +89,7 @@ export const authRoutes = new Hono<AppEnv>()
     const tokens = await issueTokens(
       created.id,
       created.email,
+      await startLoginSession(created.id),
       c.req.header("user-agent"),
     );
     return c.json({ user: created, ...tokens }, 201);
@@ -100,9 +118,17 @@ export const authRoutes = new Hono<AppEnv>()
       throw unauthorized("Incorrect email or password");
     }
 
+    // Every login is a fresh start. Material from before sessions were
+    // tracked has nothing to expire with, so it goes now. Other sign-ins that
+    // are still live -- another device -- keep theirs until they end.
+    await purgeUnscoped(found.id).catch((err: unknown) => {
+      logger.error({ err, userId: found.id }, "failed to clear old material");
+    });
+
     const tokens = await issueTokens(
       found.id,
       found.email,
+      await startLoginSession(found.id),
       c.req.header("user-agent"),
     );
     return c.json({
@@ -119,6 +145,7 @@ export const authRoutes = new Hono<AppEnv>()
       .select({
         id: refreshTokens.id,
         userId: refreshTokens.userId,
+        loginSessionId: refreshTokens.loginSessionId,
         expiresAt: refreshTokens.expiresAt,
       })
       .from(refreshTokens)
@@ -130,7 +157,7 @@ export const authRoutes = new Hono<AppEnv>()
       )
       .limit(1);
 
-    if (!stored || stored.expiresAt < new Date()) {
+    if (!stored || stored.expiresAt < new Date() || !stored.loginSessionId) {
       throw unauthorized("Invalid or expired refresh token");
     }
 
@@ -145,25 +172,38 @@ export const authRoutes = new Hono<AppEnv>()
     }
 
     // Rotate: the presented token is retired as the replacement is issued, so
-    // a stolen refresh token is usable at most once.
+    // a stolen refresh token is usable at most once. The replacement is
+    // written first, so the session is never without a live token for the
+    // sweep to mistake for an abandoned one.
+    const tokens = await issueTokens(
+      user.id,
+      user.email,
+      stored.loginSessionId,
+      c.req.header("user-agent"),
+    );
     await db()
       .update(refreshTokens)
       .set({ revokedAt: new Date() })
       .where(eq(refreshTokens.id, stored.id));
 
-    const tokens = await issueTokens(
-      user.id,
-      user.email,
-      c.req.header("user-agent"),
-    );
     return c.json(tokens);
   })
 
   .post("/logout", validate("json", refreshSchema), async (c) => {
-    await db()
+    const [stored] = await db()
       .update(refreshTokens)
       .set({ revokedAt: new Date() })
-      .where(eq(refreshTokens.tokenHash, hashRefreshToken(c.req.valid("json").refreshToken)));
+      .where(eq(refreshTokens.tokenHash, hashRefreshToken(c.req.valid("json").refreshToken)))
+      .returning({ loginSessionId: refreshTokens.loginSessionId });
+
+    // Signing out ends the session, and its uploads and chats go with it.
+    if (stored?.loginSessionId) {
+      disconnectLoginSession(stored.loginSessionId);
+      await endLoginSession(stored.loginSessionId).catch((err: unknown) => {
+        // Already unusable; the sweep finishes removing what is left.
+        logger.error({ err }, "failed to clear a signed-out session");
+      });
+    }
 
     // Always 204: revoking an unknown token is not an error worth reporting,
     // and saying so would confirm which tokens exist.
