@@ -8,8 +8,15 @@ student with full confidence. Neither raises anything.
 
 from __future__ import annotations
 
+import pytest
+
 from app.core.tokenizer import HeuristicTokenCounter
-from app.generation.history import PreparedTurn, prepare, strip_markers
+from app.generation.history import (
+    PreparedTurn,
+    needs_context,
+    prepare,
+    strip_markers,
+)
 
 
 def _exchange(n: int) -> list[tuple[str, str]]:
@@ -128,3 +135,48 @@ class TestPrepare:
         counter = HeuristicTokenCounter()
         assert prepare(_exchange(3), max_tokens=0, counter=counter) == []
         assert prepare(_exchange(3), max_turns=0, counter=counter) == []
+
+
+class TestNeedsContext:
+    """Whether a follow-up has to be rewritten before retrieval.
+
+    The asymmetry decides every borderline case: a missed rewrite retrieves
+    worse, an unneeded one only costs a call.
+    """
+
+    @pytest.mark.parametrize(
+        "question",
+        [
+            # Referring words, including inside contractions.
+            "How does its sound sensor detect noise?",
+            "Explain that more simply",
+            "That's odd, why does the buzzer beep twice in the working model?",
+            "How is the one in the block diagram powered by the supply?",
+            "What was the previous method called in the introduction slide?",
+            # Continuing openings.
+            "And what happens after the threshold is crossed?",
+            "what about the LCD display module and the buzzer circuit?",
+            "More detail on the recording feature and the notification system",
+            "Examples of places needing silence monitoring besides libraries",
+            # Too little named to stand alone.
+            "What are the advantages?",
+            "Explain the working.",
+            "Why?",
+            "Can you give an example?",
+            "What is the operating voltage of the Arduino Uno?",
+        ],
+    )
+    def test_a_dependent_follow_up_is_rewritten(self, question: str) -> None:
+        assert needs_context(question)
+
+    @pytest.mark.parametrize(
+        "question",
+        [
+            "Who won the FIFA World Cup in 2018?",
+            "Why is silence monitoring important in libraries and hospitals?",
+            "Which module sends sound level data to the ThingSpeak cloud?",
+            "How does the capacitive microphone turn vibration into voltage signals?",
+        ],
+    )
+    def test_a_self_contained_follow_up_is_not(self, question: str) -> None:
+        assert not needs_context(question)

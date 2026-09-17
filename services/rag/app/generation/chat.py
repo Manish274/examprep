@@ -8,7 +8,8 @@ without anything appearing broken:
 **Condensing.** "Why does that matter?" retrieves nothing useful on its own.
 Rewriting it against the conversation into a standalone question is what makes
 a follow-up work at all. It is skipped for the first message, where there is no
-history and the call would be pure latency.
+history, and for a follow-up that already names its subject, where the call
+would be pure latency.
 
 **Skipping the plainly off-topic.** Retrieval always returns something -- the
 nearest chunks exist whatever the question. When both the embedding similarity
@@ -50,6 +51,7 @@ from app.core.models import (
     Source,
 )
 from app.generation.context import BuiltContext, verify_citations
+from app.generation.history import needs_context
 from app.generation.history import prepare as prepare_history
 from app.generation.prompts import (
     NO_CONTEXT_REPLY,
@@ -209,6 +211,10 @@ class ChatService:
         async with span(
             "condense", question=request.question, turns=len(history)
         ) as observed:
+            if not needs_context(request.question):
+                observed.output(rewritten=request.question, skipped=True)
+                return request.question
+
             try:
                 response = await self._utility_llm.complete(  # type: ignore[attr-defined]
                     [

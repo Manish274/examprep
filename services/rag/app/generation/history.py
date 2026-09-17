@@ -36,6 +36,36 @@ _MARKER = re.compile(r"\[S\d+\]")
 # Two or more blank lines left behind after stripping markers mid-paragraph.
 _GAPS = re.compile(r"[ \t]{2,}")
 
+# Contractions split at the apostrophe: "that's" -> "that", "s".
+_WORD = re.compile(r"[a-z0-9]+")
+
+# Words that only mean something against an earlier turn.
+_REFERRING = frozenset(
+    """it its itself they them their theirs themselves this that these
+    those he him his she her hers here there former latter above same such one
+    ones else another other previous earlier mentioned said""".split()
+)
+
+# Openings that continue the previous turn rather than start a new one.
+_CONTINUATION = re.compile(
+    r"^(and|but|so|also|then|or|what about|how about|more|elaborate"
+    r"|explain (more|further|again)|continue|go on|examples?|in simpler?"
+    r"|again)\b"
+)
+
+# Question scaffolding and instruction verbs: none of them names a subject.
+_FILLER = frozenset(
+    """a an the of in on to for with by from as at into about is are was were be
+    been being do does did can could would should will may might has have had
+    what which who whom whose when where how why please me i my we our you your
+    tell give list describe explain show define summarise summarize
+    s t d m ll re ve don doesn didn isn aren wasn weren""".split()
+)
+
+# A follow-up with fewer subject words than this is rewritten regardless.
+# "What are the advantages?" names nothing on its own.
+MIN_STANDALONE_WORDS = 5
+
 
 @dataclass
 class PreparedTurn:
@@ -104,3 +134,28 @@ def prepare(
         kept.pop(0)
 
     return kept
+
+
+def needs_context(question: str) -> bool:
+    """Whether a follow-up depends on the turns before it.
+
+    Deciding this locally skips the rewrite for a question that already stands
+    alone. The rewrite is a model call on the same small daily quota the
+    vision stage reads slides with, and it adds most of a second to every
+    follow-up.
+
+    Deliberately biased toward rewriting. A question that needed rewriting and
+    did not get one retrieves worse; a question rewritten needlessly only costs
+    the call. So any referring word, any continuing opening, or too few subject
+    words means the rewrite still runs.
+    """
+    text = question.strip().lower()
+    words = _WORD.findall(text)
+
+    if any(word in _REFERRING for word in words):
+        return True
+    if _CONTINUATION.match(text):
+        return True
+
+    subject = [word for word in words if word not in _FILLER]
+    return len(subject) < MIN_STANDALONE_WORDS

@@ -248,6 +248,50 @@ class TestCondensing:
         )
         assert retrieval.queries == ["how does a bigram differ from a trigram"]
 
+    async def test_a_self_contained_follow_up_skips_the_rewrite(self) -> None:
+        # The rewrite spends a call from the quota vision reads slides with.
+        utility = MockLLMProvider(reply="should never be used")
+        service, retrieval = _service(MockLLMProvider(), utility=utility)
+        question = "How does a trigram language model estimate word probabilities?"
+
+        await service.answer(
+            _request(
+                question=question,
+                history=[
+                    ChatTurn(role="user", content="what is a bigram"),
+                    ChatTurn(role="assistant", content="A bigram is n=2."),
+                ],
+            )
+        )
+
+        assert utility.calls == []
+        assert retrieval.queries == [question]
+
+    async def test_the_skipped_follow_up_still_reaches_the_model_with_history(
+        self,
+    ) -> None:
+        # Skipping the rewrite changes retrieval only; the answering model still
+        # sees the conversation.
+        llm = MockLLMProvider(reply="Answer [S1].")
+        service, _ = _service(llm, utility=MockLLMProvider(reply="unused"))
+
+        await service.answer(
+            _request(
+                question="How does a trigram language model estimate probabilities?",
+                history=[
+                    ChatTurn(role="user", content="what is a bigram"),
+                    ChatTurn(role="assistant", content="A bigram is n=2."),
+                ],
+            )
+        )
+
+        assert [m.role for m in llm.calls[0]] == [
+            "system",
+            "user",
+            "assistant",
+            "user",
+        ]
+
     async def test_a_failed_rewrite_falls_back_to_the_question(self) -> None:
         class Broken(MockLLMProvider):
             async def complete(self, messages, **kwargs):
