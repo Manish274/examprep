@@ -91,7 +91,10 @@ export const ragHealth = (options?: RagRequestOptions): Promise<RagHealth> =>
   ragFetch<RagHealth>("/health", { method: "GET" }, { timeoutMs: 5_000, ...options });
 
 /** One chunk of a streamed chat answer. */
+export type ChatStage = "searching" | "writing" | "rechecking";
+
 export type ChatStreamEvent =
+  | { type: "stage"; stage: ChatStage; passages?: number }
   | { type: "token"; delta: string }
   | { type: "sources"; sources: ChatSource[] }
   | { type: "done"; unsupported: boolean; retrieved: number; rewrittenQuery: string | null }
@@ -189,6 +192,19 @@ export async function* ragChatStream(
 
         if (name === "token") {
           yield { type: "token", delta: String(payload.delta ?? "") };
+        } else if (name === "stage") {
+          const stage = String(payload.stage ?? "");
+          // An unknown stage from a newer service is dropped, not forwarded:
+          // the browser validates the protocol and would reject it.
+          if (stage === "searching" || stage === "writing" || stage === "rechecking") {
+            yield {
+              type: "stage",
+              stage,
+              ...(typeof payload.passages === "number"
+                ? { passages: payload.passages }
+                : {}),
+            };
+          }
         } else if (name === "sources") {
           yield { type: "sources", sources: (payload.sources ?? []) as ChatSource[] };
         } else if (name === "done") {

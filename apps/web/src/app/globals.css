@@ -24,6 +24,11 @@
 
 @media (prefers-reduced-motion: reduce) {
   .ep-rise { animation: none; }
+  /* Looping animations are stopped outright. Shortening them to 1ms, as the
+     rule below does for everything else, would leave them cycling once a
+     millisecond -- a flicker at the frame rate rather than stillness. */
+  .ep-spin, .ep-pulse { animation: none !important; }
+  .ep-pulse { opacity: .6; }
   *, *::before, *::after {
     animation-duration: 1ms !important;
     transition-duration: 1ms !important;
@@ -53,6 +58,17 @@
 .ep-card-out-right { animation: epCardOutRight var(--dur-fast) var(--ease-in) both; }
 .ep-card-in-right  { animation: epCardInRight  var(--dur-base) var(--ease-out) both; }
 .ep-card-in-left   { animation: epCardInLeft   var(--dur-base) var(--ease-out) both; }
+
+/* The dot beside an answer's current stage. Opacity only, so it reads as
+   activity without moving the text next to it. */
+@keyframes epPulse { 0%, 100% { opacity: .25; } 50% { opacity: 1; } }
+.ep-pulse {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--accent);
+  animation: epPulse 1.2s var(--ease-standard) infinite;
+}
 
 /* The dim behind a card being studied. */
 @keyframes epFade { from { opacity: 0; } to { opacity: 1; } }

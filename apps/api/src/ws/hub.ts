@@ -322,7 +322,15 @@ async function handleChat(
       },
       { correlationId: assistant.id, signal: controller.signal },
     )) {
-      if (chunk.type === "token") {
+      if (chunk.type === "stage") {
+        send(connection.socket, {
+          type: "chat:stage",
+          sessionId: session.id,
+          messageId: assistant.id,
+          stage: chunk.stage,
+          ...(chunk.passages !== undefined ? { passages: chunk.passages } : {}),
+        });
+      } else if (chunk.type === "token") {
         buffer.push(chunk.delta);
         send(connection.socket, {
           type: "chat:token",

@@ -86,6 +86,18 @@ export const serverEventSchema = z.discriminatedUnion("type", [
     messageId: uuidSchema,
   }),
   z.object({
+    /**
+     * Which phase an answer is in before its first token. Most of the wait is
+     * here -- rewriting, retrieval, reranking -- with nothing else to show.
+     */
+    type: z.literal("chat:stage"),
+    sessionId: uuidSchema,
+    messageId: uuidSchema,
+    stage: z.enum(["searching", "writing", "rechecking"]),
+    /** Passages the answer is being written from; set with "writing". */
+    passages: z.number().int().nonnegative().optional(),
+  }),
+  z.object({
     type: z.literal("chat:done"),
     sessionId: uuidSchema,
     messageId: uuidSchema,

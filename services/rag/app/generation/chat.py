@@ -463,12 +463,19 @@ class ChatService:
     async def stream(
         self, request: ChatRequest
     ) -> AsyncIterator[tuple[str, object]]:
-        """Yields ("token", str) as text arrives, then ("done", ChatResult).
+        """Yields ("stage", dict) as the answer moves between phases,
+        ("token", str) as text arrives, then ("done", ChatResult).
+
+        The stages exist because most of the wait comes before the first
+        token: the rewrite, retrieval and reranking take a couple of seconds
+        with nothing to show. Saying which of them is running is the only
+        honest progress there is.
 
         Tokens are buffered as well as forwarded so the final result can be
         verified against the sources: citations cannot be checked until the
         answer is complete.
         """
+        yield "stage", {"stage": "searching"}
         context, query, timings, evidence = await self.gather(request)
 
         if context.is_empty or self._off_topic(evidence):
@@ -476,6 +483,7 @@ class ChatService:
             yield "done", self._no_answer(query, timings, evidence)
             return
 
+        yield "stage", {"stage": "writing", "passages": len(context.sources)}
         started = time.perf_counter()
         started_at = datetime.now(timezone.utc)
 
@@ -494,6 +502,7 @@ class ChatService:
             and self._worth_rechecking(evidence)
         ):
             rechecked = True
+            yield "stage", {"stage": "rechecking"}
             attempt = _Attempt()
             async for text in self._stream_attempt(
                 self._messages(request, context, recheck=True), 0.0, attempt

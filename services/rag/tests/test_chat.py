@@ -851,3 +851,81 @@ class TestOffTopicQuestions:
         assert final is not None
         assert final.unsupported
         assert llm.calls == []
+
+
+async def _events(service: ChatService) -> list[tuple[str, object]]:
+    return [event async for event in service.stream(_request())]
+
+
+def _stages(events: list[tuple[str, object]]) -> list[object]:
+    return [value for kind, value in events if kind == "stage"]
+
+
+class TestStages:
+    """Most of the wait is before the first token; the stages say what it is."""
+
+    async def test_an_answer_searches_then_writes(self) -> None:
+        service, _ = _service(MockLLMProvider(reply="Answer [S1]."))
+        events = await _events(service)
+
+        assert _stages(events) == [
+            {"stage": "searching"},
+            {"stage": "writing", "passages": 1},
+        ]
+        kinds = [kind for kind, _ in events]
+        assert kinds[:2] == ["stage", "stage"]
+        assert kinds[-1] == "done"
+
+    async def test_no_material_never_claims_to_be_writing(self) -> None:
+        service, _ = _service(MockLLMProvider(), chunks=[])
+        assert _stages(await _events(service)) == [{"stage": "searching"}]
+
+    async def test_an_off_topic_question_never_claims_to_be_writing(self) -> None:
+        service = _gated(MockLLMProvider(), similarity=0.475, relevance=0.033)
+        assert _stages(await _events(service)) == [{"stage": "searching"}]
+
+    async def test_a_recheck_says_so(self) -> None:
+        llm = Scripted(UNSUPPORTED_TOKEN, "Answer [S1].")
+        events = await _events(_rechecking(llm, relevance=0.56))
+
+        assert _stages(events)[-1] == {"stage": "rechecking"}
+
+
+class TestStreamEndpoint:
+    async def test_stages_travel_as_their_own_events(self, monkeypatch) -> None:
+        import json
+        from types import SimpleNamespace
+
+        import httpx
+
+        import app.api.chat as chat_api
+        from app.config import Settings, get_settings
+        from app.main import create_app
+
+        service, _ = _service(MockLLMProvider(reply="Answer [S1]."))
+        monkeypatch.setattr(
+            chat_api, "get_container", lambda: SimpleNamespace(chat=service)
+        )
+        application = create_app()
+        application.dependency_overrides[get_settings] = lambda: Settings(
+            INTERNAL_SERVICE_TOKEN="test-token"
+        )
+
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=application), base_url="http://test"
+        ) as client:
+            response = await client.post(
+                "/chat/stream",
+                headers={"x-internal-token": "test-token"},
+                json={"question": "what is smoothing", "user_id": "u1"},
+            )
+
+        assert response.status_code == 200
+        frames = [f for f in response.text.split("\n\n") if f.strip()]
+        names = [f.split("\n")[0].removeprefix("event: ") for f in frames]
+        assert names[:2] == ["stage", "stage"]
+        assert names[-2:] == ["sources", "done"]
+        assert "token" in names
+
+        writing = json.loads(frames[1].split("\n")[1].removeprefix("data: "))
+        assert writing == {"stage": "writing", "passages": 1}

@@ -136,6 +136,9 @@ async def chat_stream(
                 if kind == "token":
                     yield _event("token", {"delta": value})
                     continue
+                if kind == "stage":
+                    yield _event("stage", value)  # type: ignore[arg-type]
+                    continue
 
                 result: ChatResult = value  # type: ignore[assignment]
                 yield _event(

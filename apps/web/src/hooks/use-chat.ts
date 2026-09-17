@@ -28,7 +28,13 @@ export interface Turn {
   unsupported: boolean;
   /** True while tokens are still arriving. */
   streaming?: boolean;
+  /** What the answer is doing before its first token. */
+  stage?: ChatStage;
+  /** Passages it is being written from, once known. */
+  passages?: number;
 }
+
+export type ChatStage = "searching" | "writing" | "rechecking";
 
 export type ChatMode = "simple" | "detailed" | "exam";
 
@@ -163,8 +169,24 @@ export function useChat() {
             sources: [],
             unsupported: false,
             streaming: true,
+            stage: "searching",
           },
         ]);
+        break;
+      }
+
+      case "chat:stage": {
+        setTurns((rows) =>
+          rows.map((row) =>
+            row.id === event.messageId
+              ? {
+                  ...row,
+                  stage: event.stage,
+                  passages: event.passages ?? row.passages,
+                }
+              : row,
+          ),
+        );
         break;
       }
 

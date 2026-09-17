@@ -2,7 +2,22 @@
 
 import { Badge, Message } from "@/ds";
 import { Answer, Sources } from "./answer";
-import type { Turn } from "@/hooks/use-chat";
+import type { ChatStage, Turn } from "@/hooks/use-chat";
+
+/**
+ * What the wait is, said plainly. Most of it comes before the first word:
+ * the question is rewritten, searched for and ranked, and until now the
+ * student saw the same line for all of it.
+ */
+function stageLabel(stage: ChatStage | undefined, passages?: number): string {
+  if (stage === "writing") {
+    return passages
+      ? `writing from ${passages} ${passages === 1 ? "passage" : "passages"}`
+      : "writing";
+  }
+  if (stage === "rechecking") return "reading the passages again";
+  return "searching your notes";
+}
 
 /**
  * The conversation.
@@ -39,13 +54,19 @@ export function ChatThread({
               <Answer text={turn.content} sources={turn.sources} />
               {turn.streaming && turn.content === "" ? (
                 <span
+                  role="status"
+                  aria-live="polite"
                   style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 8,
                     fontFamily: "var(--font-mono)",
                     fontSize: 11,
                     color: "var(--text-faint)",
                   }}
                 >
-                  searching your notes
+                  <span aria-hidden="true" className="ep-pulse" />
+                  {stageLabel(turn.stage, turn.passages)}
                 </span>
               ) : null}
               {!turn.streaming ? <Sources sources={turn.sources} /> : null}

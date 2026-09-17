@@ -70,6 +70,36 @@ describe("ragChatStream", () => {
     });
   });
 
+  it("passes the answer's stages through before its tokens", async () => {
+    stubStream([
+      'event: stage\ndata: {"stage":"searching"}\n\n',
+      'event: stage\ndata: {"stage":"writing","passages":8}\n\n',
+      'event: token\ndata: {"delta":"Hi"}\n\n',
+      'event: stage\ndata: {"stage":"rechecking"}\n\n',
+    ]);
+
+    const events = await collect();
+
+    expect(events).toEqual([
+      { type: "stage", stage: "searching" },
+      { type: "stage", stage: "writing", passages: 8 },
+      { type: "token", delta: "Hi" },
+      { type: "stage", stage: "rechecking" },
+    ]);
+  });
+
+  it("drops a stage it does not know rather than forwarding it", async () => {
+    // The browser validates the protocol; an unknown stage would be rejected
+    // there, so it never leaves the API.
+    stubStream([
+      'event: stage\ndata: {"stage":"pondering"}\n\n',
+      'event: token\ndata: {"delta":"ok"}\n\n',
+    ]);
+
+    const events = await collect();
+    expect(events).toEqual([{ type: "token", delta: "ok" }]);
+  });
+
   it("reassembles an event split across network chunks", async () => {
     // A network read boundary lands wherever it lands. Parsing each chunk
     // independently would drop or corrupt any event straddling one.
