@@ -95,10 +95,13 @@ class Settings(BaseSettings):
     CHAT_HISTORY_TURNS: int = 8
     CHAT_HISTORY_MAX_TOKENS: int = 1500
     # A refusal is regenerated once when the best reranker relevance is at
-    # least this. Measured on a real deck: answerable questions scored
-    # 0.56-0.67 at the top, an off-topic one 0.03 -- including the answerable
-    # question the model refused. Only applies to a calibrated reranker.
-    CHAT_RECHECK_MIN_RELEVANCE: float = 0.4
+    # least this. Measured with Jina on a real deck, 30 answerable questions
+    # scored 0.07-0.79 at the top, 10 on-topic questions the deck does not
+    # answer 0.04-0.50, and 13 off-topic ones 0.03-0.17. At 0.2 the recheck
+    # covers 22 of the 30 answerable questions (0.4 covered 10) and none of the
+    # off-topic ones; the near misses it does reach were still refused on
+    # recheck. Only applies to a calibrated reranker.
+    CHAT_RECHECK_MIN_RELEVANCE: float = 0.2
 
     # ── observability ────────────────────────────────────────
     TRACER: str = "postgres"
