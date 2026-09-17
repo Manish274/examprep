@@ -24,6 +24,22 @@ const API_PORT = process.env.API_PORT || "3001";
 const RAG_PORT = process.env.RAG_SERVICE_PORT || "8000";
 const WEB_PORT = process.env.WEB_PORT || "3000";
 
+/**
+ * Local addresses, spelled out for the Node services.
+ *
+ * On Windows `localhost` resolves to ::1 first, and a server listening on IPv4
+ * alone makes any client that does not race the two families wait about two
+ * seconds for the refusal before it tries 127.0.0.1 -- measured on every
+ * WebSocket a script opened. So the API listens on both families, and calls to
+ * the RAG service go straight to the one address uvicorn is bound to.
+ *
+ * These win over .env: Node's loader never replaces a variable already set.
+ */
+const LOCAL_ADDRESSES = {
+  API_HOST: "::",
+  RAG_SERVICE_URL: `http://127.0.0.1:${RAG_PORT}`,
+};
+
 const COLOURS = {
   rag: "\x1b[35m",
   api: "\x1b[36m",
@@ -62,13 +78,13 @@ function pythonPath() {
  */
 const TSX = join(ROOT, "node_modules", "tsx", "dist", "cli.mjs");
 
-function start(name, command, args, cwd) {
+function start(name, command, args, cwd, env = {}) {
   const child = spawn(command, args, {
     cwd,
     // Deliberately not `shell: true`. The repository path contains a space,
     // and a shell would split it -- "E:\RAG Project" becomes "E:\RAG".
     shell: false,
-    env: process.env,
+    env: { ...process.env, ...env },
   });
   children.push({ name, child });
 
@@ -172,8 +188,20 @@ start(
   ],
   join(ROOT, "services", "rag"),
 );
-start("api", process.execPath, [TSX, "watch", "src/index.ts"], join(ROOT, "apps", "api"));
-start("worker", process.execPath, [TSX, "watch", "src/index.ts"], join(ROOT, "apps", "worker"));
+start(
+  "api",
+  process.execPath,
+  [TSX, "watch", "src/index.ts"],
+  join(ROOT, "apps", "api"),
+  LOCAL_ADDRESSES,
+);
+start(
+  "worker",
+  process.execPath,
+  [TSX, "watch", "src/index.ts"],
+  join(ROOT, "apps", "worker"),
+  LOCAL_ADDRESSES,
+);
 // Next ships its own CLI entry point, spawned through this node binary for the
 // same reason as tsx: no .cmd shim, no shell, no path split at the space.
 start(
