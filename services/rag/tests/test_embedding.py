@@ -105,6 +105,75 @@ class TestEmbeddingCache:
         await provider.embed_documents(["alpha", "beta"])
         assert (provider.hits, provider.misses) == (2, 2)
 
+    async def test_a_repeated_query_is_embedded_once(self) -> None:
+        # The retrieval inspector runs one question through several strategies.
+        calls: list[str] = []
+
+        class Counting(MockEmbeddingProvider):
+            async def embed_query(self, text):  # type: ignore[override]
+                calls.append(text)
+                return await super().embed_query(text)
+
+        provider = CachedEmbeddingProvider(
+            Counting(dimensions=32), InMemoryEmbeddingCache()
+        )
+        first = await provider.embed_query("what is a bigram")
+        second = await provider.embed_query("what  is a bigram ")
+
+        assert calls == ["what is a bigram"]
+        assert first.values == second.values
+        assert (provider.query_hits, provider.query_misses) == (1, 1)
+
+    async def test_query_hits_do_not_count_as_document_hits(self) -> None:
+        # Ingestion reports `hits` as its own cache hits.
+        provider = CachedEmbeddingProvider(
+            MockEmbeddingProvider(dimensions=32), InMemoryEmbeddingCache()
+        )
+        await provider.embed_query("q")
+        await provider.embed_query("q")
+
+        assert (provider.hits, provider.misses) == (0, 0)
+
+    async def test_queries_never_reach_the_persistent_cache(self) -> None:
+        cache = InMemoryEmbeddingCache()
+        provider = CachedEmbeddingProvider(MockEmbeddingProvider(dimensions=32), cache)
+        await provider.embed_query("a question asked once")
+
+        assert cache._store == {}
+
+    async def test_the_query_cache_is_bounded(self) -> None:
+        calls: list[str] = []
+
+        class Counting(MockEmbeddingProvider):
+            async def embed_query(self, text):  # type: ignore[override]
+                calls.append(text)
+                return await super().embed_query(text)
+
+        provider = CachedEmbeddingProvider(
+            Counting(dimensions=32), InMemoryEmbeddingCache(), query_cache_size=2
+        )
+        for text in ["a", "b", "a", "c", "b"]:
+            await provider.embed_query(text)
+
+        # "a" was used recently, so "b" was the one evicted when "c" arrived.
+        assert calls == ["a", "b", "c", "b"]
+
+    async def test_a_zero_sized_query_cache_disables_it(self) -> None:
+        calls: list[str] = []
+
+        class Counting(MockEmbeddingProvider):
+            async def embed_query(self, text):  # type: ignore[override]
+                calls.append(text)
+                return await super().embed_query(text)
+
+        provider = CachedEmbeddingProvider(
+            Counting(dimensions=32), InMemoryEmbeddingCache(), query_cache_size=0
+        )
+        await provider.embed_query("q")
+        await provider.embed_query("q")
+
+        assert calls == ["q", "q"]
+
     async def test_a_repeated_string_is_embedded_once(self) -> None:
         # Identical text appears more than once inside a single document.
         calls: list[int] = []

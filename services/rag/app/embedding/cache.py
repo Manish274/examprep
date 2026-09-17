@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections import OrderedDict
 from collections.abc import Sequence
 from typing import Protocol
 
@@ -149,18 +150,33 @@ class PostgresEmbeddingCache:
 class CachedEmbeddingProvider:
     """Wraps any EmbeddingProvider with a read-through cache.
 
-    Only document embeddings are cached. Queries are typed differently by the
-    model and are rarely repeated verbatim, so caching them would spend storage
-    for almost no hit rate.
+    Document embeddings go to the shared, persistent cache. Query embeddings do
+    not: they are typed differently by the model, a full-width vector is tens
+    of kilobytes as JSON, and most questions are asked once -- persisting them
+    would grow the table with every question for a low hit rate.
+
+    Queries get a small in-process LRU instead, for the repeats that do happen
+    close together: the retrieval inspector running one question through
+    several strategies, an evaluation sweep, a student re-asking after an
+    error. Each of those used to be a fresh embedding round trip.
     """
 
-    def __init__(self, inner: object, cache: EmbeddingCache) -> None:
+    def __init__(
+        self, inner: object, cache: EmbeddingCache, *, query_cache_size: int = 64
+    ) -> None:
         self._inner = inner
         self._cache = cache
         self.model_id: str = inner.model_id  # type: ignore[attr-defined]
         self.dimensions: int = inner.dimensions  # type: ignore[attr-defined]
+        # Document counters only: ingestion reports these as its cache hits.
         self.hits = 0
         self.misses = 0
+        # About 100 KB per full-width vector held as Python floats, so the
+        # default bounds this near 6 MB.
+        self._queries: OrderedDict[str, EmbeddingVector] = OrderedDict()
+        self._query_cache_size = query_cache_size
+        self.query_hits = 0
+        self.query_misses = 0
 
     async def embed_documents(
         self, texts: Sequence[str]
@@ -198,5 +214,18 @@ class CachedEmbeddingProvider:
             for h in hashes
         ]
 
-    async def embed_query(self, text: str):
-        return await self._inner.embed_query(text)  # type: ignore[attr-defined]
+    async def embed_query(self, text: str) -> EmbeddingVector:
+        key = content_hash(text)
+        cached = self._queries.get(key)
+        if cached is not None:
+            self._queries.move_to_end(key)
+            self.query_hits += 1
+            return cached
+
+        self.query_misses += 1
+        vector: EmbeddingVector = await self._inner.embed_query(text)  # type: ignore[attr-defined]
+        if self._query_cache_size > 0:
+            self._queries[key] = vector
+            while len(self._queries) > self._query_cache_size:
+                self._queries.popitem(last=False)
+        return vector
