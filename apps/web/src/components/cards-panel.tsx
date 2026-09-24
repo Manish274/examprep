@@ -204,6 +204,7 @@ export function CardsPanel({
             question={card.front}
             answer={card.back}
             hint="Click to study"
+            printed
             onActivate={() => setStudying(true)}
             flipped={false}
           />
@@ -308,7 +309,7 @@ export function CardsPanel({
                     question={card.front}
                     answer={card.back}
                     height={340}
-                    surface="var(--surface-raised)"
+                    printed
                     flipped={flipped}
                     onFlip={setFlipped}
                   />

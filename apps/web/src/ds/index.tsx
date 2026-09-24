@@ -1226,6 +1226,9 @@ export function QuizOption({
  * for a minute, and that says less honestly that anything is happening.
  * Reduced-motion preferences stop it, leaving a static arc.
  */
+/** The looping film used wherever a ring turns with nothing to report. */
+const LOADER_SRC = "/loader.webm";
+
 export function ProgressRing({
   value = 0,
   size = 64,
@@ -1244,6 +1247,7 @@ export function ProgressRing({
   const radius = (size - thickness) / 2;
   const circumference = 2 * Math.PI * radius;
   const shown = indeterminate ? 0.26 : Math.max(0, Math.min(1, value));
+  const reduced = usePrefersReducedMotion();
 
   return (
     <span
@@ -1257,6 +1261,27 @@ export function ProgressRing({
         ...style,
       }}
     >
+      {/* Waiting with nothing to report is the film's job; a ring with a real
+          fraction behind it stays a ring, because the fraction is the point.
+          Reduced motion keeps the still arc below rather than a still film. */}
+      {indeterminate && !reduced ? (
+        <video
+          src={LOADER_SRC}
+          autoPlay
+          muted
+          loop
+          playsInline
+          preload="auto"
+          aria-hidden="true"
+          tabIndex={-1}
+          style={{
+            width: size,
+            height: size,
+            objectFit: "cover",
+            borderRadius: "var(--radius-pill)",
+          }}
+        />
+      ) : (
       <svg
         width={size}
         height={size}
@@ -1287,6 +1312,7 @@ export function ProgressRing({
           }}
         />
       </svg>
+      )}
       {label ? (
         <span
           style={{
@@ -1350,6 +1376,19 @@ const FACE: CSSProperties = {
   WebkitBackfaceVisibility: "hidden",
 };
 
+/**
+ * The card stock.
+ *
+ * A face carrying the printed image is light, so everything on it switches to
+ * ink: white type over that gradient is unreadable at the sizes a card uses.
+ */
+const CARD_IMAGE = "/flashcard-face.webp";
+
+const INK_ON_IMAGE = {
+  display: "#15121C",
+  quiet: "rgba(21, 18, 28, .62)",
+} as const;
+
 const FACE_LABEL: CSSProperties = {
   position: "absolute",
   top: "var(--space-7)",
@@ -1394,6 +1433,7 @@ export function Flashcard({
   hint,
   height = 260,
   surface = "var(--surface-card)",
+  printed = false,
   flipped,
   onFlip,
   onActivate,
@@ -1405,6 +1445,8 @@ export function Flashcard({
   height?: number;
   /** The face fill. Lifted in study mode so the card reads as the lit object. */
   surface?: string;
+  /** Prints both faces on the card stock image instead of the flat fill. */
+  printed?: boolean;
   flipped?: boolean;
   onFlip?: (next: boolean) => void;
   /** When given, a click opens the card instead of flipping it. */
@@ -1415,6 +1457,16 @@ export function Flashcard({
   const glare = useRef<HTMLDivElement>(null);
   const reduced = usePrefersReducedMotion();
   const isFlipped = flipped !== undefined ? flipped : self;
+
+  const faceFill = printed
+    ? `url(${CARD_IMAGE}) center / cover no-repeat`
+    : surface;
+  // On the image, a light wash would flatten the gradient; a soft dark edge
+  // gives the card a shape instead.
+  const faceWash = printed
+    ? "radial-gradient(130% 100% at 50% 0%, transparent 42%, rgba(21,18,28,.16))"
+    : "var(--wash-vignette)";
+  const quietInk = printed ? { color: INK_ON_IMAGE.quiet } : null;
 
   const activate = () => {
     if (onActivate) {
@@ -1504,17 +1556,17 @@ export function Flashcard({
             transition: "transform var(--dur-slow) var(--ease-standard)",
           }}
         >
-          <div style={{ ...FACE, background: surface }}>
+          <div style={{ ...FACE, background: faceFill }}>
             <div
               aria-hidden="true"
               style={{
                 position: "absolute",
                 inset: 0,
-                background: "var(--wash-vignette)",
+                background: faceWash,
                 pointerEvents: "none",
               }}
             />
-            <span style={FACE_LABEL}>Question</span>
+            <span style={{ ...FACE_LABEL, ...quietInk }}>Question</span>
             <p
               className="ep-scroll"
               style={{
@@ -1527,30 +1579,30 @@ export function Flashcard({
                 fontSize: "var(--display-md)",
                 lineHeight: "var(--display-md-lh)",
                 letterSpacing: "var(--track-tight)",
-                color: "var(--text-display)",
+                color: printed ? INK_ON_IMAGE.display : "var(--text-display)",
               }}
             >
               {question}
             </p>
-            <span style={FACE_FOOT}>
+            <span style={{ ...FACE_FOOT, ...quietInk }}>
               {source ? <span>{source}</span> : null}
               <span style={{ marginLeft: "auto" }}>{hint ?? "Click to reveal"}</span>
             </span>
           </div>
 
           <div
-            style={{ ...FACE, background: surface, transform: "rotateY(180deg)" }}
+            style={{ ...FACE, background: faceFill, transform: "rotateY(180deg)" }}
           >
             <div
               aria-hidden="true"
               style={{
                 position: "absolute",
                 inset: 0,
-                background: "var(--wash-vignette)",
+                background: faceWash,
                 pointerEvents: "none",
               }}
             />
-            <span style={FACE_LABEL}>Answer</span>
+            <span style={{ ...FACE_LABEL, ...quietInk }}>Answer</span>
             <p
               className="ep-scroll"
               style={{
