@@ -7,6 +7,7 @@
 import Link from "next/link";
 import { ArrowRight, ArrowUp } from "lucide-react";
 import { Badge, Button, Card, Display, Wordmark } from "@/ds";
+import { HeroGlow, RevealOnScroll } from "@/components/landing-motion";
 import { SignedInRedirect } from "./signed-in-redirect";
 
 /**
@@ -14,8 +15,10 @@ import { SignedInRedirect } from "./signed-in-redirect";
  * project: hero over the aurora wash and hairline rings, the two-modes pair,
  * a three-step explainer, the traceability section, a closing card and footer.
  *
- * Prerendered to static HTML at build time; the only thing it does at runtime
- * is send an already-signed-in student straight through to the workspace.
+ * Prerendered to static HTML at build time. At runtime it sends a student who
+ * is already in straight through to the workspace, and adds the motion the
+ * static markup cannot carry: a light that follows the cursor across the hero,
+ * and sections that arrive as they are scrolled to.
  */
 
 const CAPS: React.CSSProperties = {
@@ -81,6 +84,7 @@ export default function LandingPage() {
       }}
     >
       <SignedInRedirect />
+      <RevealOnScroll />
 
       <header
         style={{
@@ -135,6 +139,7 @@ export default function LandingPage() {
             pointerEvents: "none",
           }}
         />
+        <HeroGlow />
         <div
           aria-hidden="true"
           style={{
@@ -239,6 +244,7 @@ export default function LandingPage() {
 
       {/* ── two modes ────────────────────────────────────── */}
       <section
+        data-reveal
         id="modes"
         style={{ padding: "clamp(72px, 10vw, 132px) clamp(20px, 4vw, 48px)" }}
       >
@@ -287,7 +293,7 @@ export default function LandingPage() {
               gap: "var(--space-7)",
             }}
           >
-            <Card padding="clamp(24px, 3vw, 36px)">
+            <Card className="ep-lift" padding="clamp(24px, 3vw, 36px)">
               <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-6)" }}>
                 <div style={{ display: "flex" }}>
                   <Badge tone="accent">Chat</Badge>
@@ -340,7 +346,7 @@ export default function LandingPage() {
               </div>
             </Card>
 
-            <Card padding="clamp(24px, 3vw, 36px)">
+            <Card className="ep-lift" padding="clamp(24px, 3vw, 36px)">
               <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-6)" }}>
                 <div style={{ display: "flex" }}>
                   <Badge tone="neutral">Quiz · Cards</Badge>
@@ -422,6 +428,7 @@ export default function LandingPage() {
 
       {/* ── how it works ─────────────────────────────────── */}
       <section
+        data-reveal
         id="how"
         style={{ padding: "0 clamp(20px, 4vw, 48px) clamp(72px, 10vw, 132px)" }}
       >
@@ -435,6 +442,7 @@ export default function LandingPage() {
             {STEPS.map((step, index) => (
               <div
                 key={step.n}
+                className="ep-lift"
                 style={{
                   display: "flex",
                   flexDirection: "column",
@@ -479,6 +487,7 @@ export default function LandingPage() {
 
       {/* ── traceability ─────────────────────────────────── */}
       <section
+        data-reveal
         id="sources"
         style={{ padding: "0 clamp(20px, 4vw, 48px) clamp(72px, 10vw, 132px)" }}
       >
@@ -543,7 +552,7 @@ export default function LandingPage() {
       </section>
 
       {/* ── closing ──────────────────────────────────────── */}
-      <section style={{ padding: "0 clamp(20px, 4vw, 48px) clamp(56px, 7vw, 88px)" }}>
+      <section data-reveal style={{ padding: "0 clamp(20px, 4vw, 48px) clamp(56px, 7vw, 88px)" }}>
         <Card
           padding="clamp(36px, 6vw, 76px)"
           style={{ maxWidth: 1120, margin: "0 auto" }}

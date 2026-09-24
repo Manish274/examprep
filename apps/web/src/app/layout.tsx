@@ -58,6 +58,14 @@ export default function RootLayout({ children }: { children: ReactNode }) {
       className={`${display.variable} ${sans.variable} ${mono.variable}`}
       style={{ height: "100%" }}
     >
+      <head>
+        {/* Sections that fade in as they are scrolled to start hidden, which
+            depends on the observer that shows them. With no script there is no
+            observer, so they are shown outright. */}
+        <noscript>
+          <style>{"[data-reveal]{opacity:1!important;transform:none!important}"}</style>
+        </noscript>
+      </head>
       <body style={{ minHeight: "100%" }}>
         <AuthProvider>
           <SocketProvider>{children}</SocketProvider>
