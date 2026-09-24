@@ -7,7 +7,7 @@
 import Link from "next/link";
 import { ArrowRight, ArrowUp } from "lucide-react";
 import { Badge, Button, Card, Display, Wordmark } from "@/ds";
-import { HeroGlow, RevealOnScroll } from "@/components/landing-motion";
+import { RevealOnScroll } from "@/components/landing-motion";
 import { SignedInRedirect } from "./signed-in-redirect";
 
 /**
@@ -16,9 +16,8 @@ import { SignedInRedirect } from "./signed-in-redirect";
  * a three-step explainer, the traceability section, a closing card and footer.
  *
  * Prerendered to static HTML at build time. At runtime it sends a student who
- * is already in straight through to the workspace, and adds the motion the
- * static markup cannot carry: a light that follows the cursor across the hero,
- * and sections that arrive as they are scrolled to.
+ * is already in straight through to the workspace, and reveals each section as
+ * it is scrolled to.
  */
 
 const CAPS: React.CSSProperties = {
@@ -139,7 +138,6 @@ export default function LandingPage() {
             pointerEvents: "none",
           }}
         />
-        <HeroGlow />
         <div
           aria-hidden="true"
           style={{

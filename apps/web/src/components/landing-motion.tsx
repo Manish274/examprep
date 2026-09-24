@@ -1,53 +1,15 @@
 "use client";
 
-import { useEffect, useRef } from "react";
-import { usePrefersReducedMotion } from "@/ds";
+import { useEffect } from "react";
 
 /**
- * What makes the marketing page feel awake.
+ * What makes the marketing page feel awake: its sections arrive as they are
+ * scrolled to. Written straight to the DOM rather than held in state, since a
+ * section that fades in would otherwise re-render the page on every scroll.
  *
- * Both pieces are decoration, and both are written straight to the DOM rather
- * than held in state: a light that follows the cursor would otherwise
- * re-render the page on every pointer event, and a section that fades in would
- * re-render it on every scroll.
- *
- * Nothing here loads a video -- the film belongs to the start screen, and the
- * landing page stays the quiet thing it was designed to be.
+ * Nothing here loads a video -- the film belongs to the rest of the app, and
+ * the landing page stays the quiet thing it was designed to be.
  */
-
-/**
- * A soft light under the pointer, across whichever section contains it.
- *
- * Absolute inside its parent, so the parent needs `position: relative` -- the
- * hero already does.
- */
-export function HeroGlow() {
-  const glow = useRef<HTMLDivElement>(null);
-  const reduced = usePrefersReducedMotion();
-
-  useEffect(() => {
-    const element = glow.current;
-    const section = element?.parentElement;
-    if (!element || !section || reduced) return;
-
-    const move = (event: PointerEvent) => {
-      const box = section.getBoundingClientRect();
-      element.style.setProperty("--mx", `${event.clientX - box.left}px`);
-      element.style.setProperty("--my", `${event.clientY - box.top}px`);
-      element.classList.add("is-lit");
-    };
-    const leave = () => element.classList.remove("is-lit");
-
-    section.addEventListener("pointermove", move);
-    section.addEventListener("pointerleave", leave);
-    return () => {
-      section.removeEventListener("pointermove", move);
-      section.removeEventListener("pointerleave", leave);
-    };
-  }, [reduced]);
-
-  return <div ref={glow} className="ep-hero-glow" aria-hidden="true" />;
-}
 
 /**
  * Fades every `data-reveal` section in the first time it is scrolled to.

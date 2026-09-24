@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Button, Display, Wordmark, usePrefersReducedMotion } from "@/ds";
+import { Button, Display, Wordmark } from "@/ds";
+import { Backdrop } from "@/components/backdrop";
 import { useAuth } from "@/lib/auth";
 import { ApiError } from "@/lib/api";
 
@@ -14,9 +15,7 @@ import { ApiError } from "@/lib/api";
  * and ending it deletes what was uploaded -- so there is nothing a password
  * would be protecting between visits.
  *
- * The video is decoration: muted, looping, and behind a dim wash that keeps
- * the field and its label legible. A student who has asked for reduced motion
- * gets its first frame as a still image instead.
+ * The film behind it is shared with the workspace; see `Backdrop`.
  */
 
 const FIELD: React.CSSProperties = {
@@ -50,24 +49,6 @@ export default function StartPage() {
   const [name, setName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const video = useRef<HTMLVideoElement>(null);
-  const reduced = usePrefersReducedMotion();
-
-  useEffect(() => {
-    const element = video.current;
-    if (!element) return;
-    // Autoplay is declined by some browsers even when muted, and the setting
-    // can change while the page is open, so play and pause are driven here
-    // rather than left to the attribute alone.
-    if (reduced) {
-      element.pause();
-      element.currentTime = 0;
-    } else {
-      // A refused play is not an error worth surfacing: the still frame and
-      // the wash behind it are a perfectly good backdrop.
-      void element.play().catch(() => undefined);
-    }
-  }, [reduced]);
 
   useEffect(() => {
     if (loaded && session) router.replace("/study");
@@ -104,20 +85,7 @@ export default function StartPage() {
         overflow: "hidden",
       }}
     >
-      <div className="ep-backdrop" aria-hidden="true">
-        <video
-          ref={video}
-          src="/violet-crown.webm"
-          muted
-          loop
-          playsInline
-          preload="auto"
-          // Chrome only honours autoplay on a muted video; the effect above
-          // covers the browsers that still refuse it.
-          autoPlay={!reduced}
-          tabIndex={-1}
-        />
-      </div>
+      <Backdrop />
 
       <div
         className="ep-rise"

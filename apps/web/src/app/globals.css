@@ -195,23 +195,6 @@
 }
 .ep-lift:hover { transform: translateY(-4px); }
 
-/* The light that follows the cursor across the hero. Position comes from
-   --mx/--my, written to the element by a pointermove handler, so following the
-   cursor costs no React render. */
-.ep-hero-glow {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  opacity: 0;
-  transition: opacity var(--dur-slow) var(--ease-out);
-  background: radial-gradient(
-    420px circle at var(--mx, 50%) var(--my, 40%),
-    rgba(138, 122, 255, .13),
-    transparent 70%
-  );
-}
-.ep-hero-glow.is-lit { opacity: 1; }
-
 @media (prefers-reduced-motion: reduce) {
   [data-reveal] { opacity: 1; transform: none; }
   .ep-lift:hover { transform: none; }

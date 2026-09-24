@@ -1386,6 +1386,9 @@ const CARD_IMAGE = "/flashcard-face.webp";
 
 const INK_ON_IMAGE = {
   display: "#15121C",
+  // The answer is the side a student reads closely, so it is set in full
+  // black rather than the near-black the question uses.
+  answer: "#000000",
   quiet: "rgba(21, 18, 28, .62)",
 } as const;
 
@@ -1610,14 +1613,19 @@ export function Flashcard({
                 position: "relative",
                 maxHeight: "100%",
                 overflowY: "auto",
-                fontSize: "var(--text-lg)",
-                lineHeight: 1.62,
-                color: "var(--text-body)",
+                // The answer is set like the question -- same face, same size
+                // -- so turning the card changes the words and nothing else.
+                fontFamily: "var(--font-display)",
+                fontStyle: "italic",
+                fontSize: "var(--display-md)",
+                lineHeight: "var(--display-md-lh)",
+                letterSpacing: "var(--track-tight)",
+                color: printed ? INK_ON_IMAGE.answer : "var(--text-body)",
               }}
             >
               {answer}
             </p>
-            <span style={FACE_FOOT}>
+            <span style={{ ...FACE_FOOT, ...quietInk }}>
               {source ? <span>{source}</span> : null}
               <span style={{ marginLeft: "auto" }}>
                 {hint ?? "Click for the question"}

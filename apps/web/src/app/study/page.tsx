@@ -10,6 +10,7 @@ import {
   IconButton,
   SuggestionChip,
 } from "@/ds";
+import { Backdrop } from "@/components/backdrop";
 import { Rail } from "@/components/rail";
 import { ChatThread } from "@/components/chat-thread";
 import { QuizPanel } from "@/components/quiz-panel";
@@ -196,7 +197,10 @@ export default function StudyPage() {
   );
 
   return (
-    <div style={{ display: "flex", minHeight: "100svh", background: "var(--bg-page)" }}>
+    // No page fill: the film behind it is the background, and painting over
+    // it here would leave the workspace the only screen without one.
+    <div style={{ display: "flex", minHeight: "100svh", position: "relative" }}>
+      <Backdrop />
       <Rail
         open={railOpen}
         onToggle={() => setRailOpen((was) => !was)}
@@ -411,8 +415,10 @@ export default function StudyPage() {
                   position: "sticky",
                   bottom: 0,
                   padding: "0 var(--gutter) var(--space-8)",
+                  // Fades the scrolling conversation out behind the composer
+                  // without hiding the film: opaque ink would read as a bar.
                   background:
-                    "linear-gradient(to top, var(--bg-page) 62%, transparent)",
+                    "linear-gradient(to top, rgba(10,10,11,.92) 55%, transparent)",
                 }}
               >
                 <div

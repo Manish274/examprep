@@ -57,7 +57,11 @@ export function Rail({
         top: 0,
         overflow: "hidden",
         borderRight: open ? "1px solid var(--line-1)" : "1px solid transparent",
-        background: "var(--bg-rail)",
+        // Translucent over the film rather than a solid column, blurred so
+        // the names in it stay readable against whatever is moving behind.
+        background: "rgba(16, 16, 18, .72)",
+        backdropFilter: "blur(18px)",
+        WebkitBackdropFilter: "blur(18px)",
         // 220ms is the system's duration for panels and borders.
         transition:
           "width var(--dur-base) var(--ease-standard), border-color var(--dur-base) var(--ease-standard)",
