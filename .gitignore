@@ -9,8 +9,8 @@ build/
 
 # env
 .env
-.env.local
-.env.*.local
+.env.*
+!.env.example
 
 # python
 __pycache__/
@@ -22,14 +22,12 @@ venv/
 .mypy_cache/
 *.egg-info/
 
-# uploaded documents + derived artefacts
+# uploaded documents
 storage/uploads/*
 !storage/uploads/.gitkeep
-storage/derived/
 
-# eval artefacts
-services/rag/eval_runs/
-services/rag/gold_sets/*.jsonl
+# gold sets name chunk ids that only exist while their visit does
+services/rag/gold_sets/
 
 # logs / os / editor
 *.log
@@ -45,14 +43,3 @@ coverage/
 .nyc_output/
 htmlcov/
 .coverage
-
-# pytest/tooling artefacts
-services/rag/.pytest_cache/
-
-# local dev scratch (holds a live access token)
-.devtoken
-.devdoc
-.devdoc2
-.devsession
-.devtest
-.devuser
