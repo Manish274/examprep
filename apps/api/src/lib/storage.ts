@@ -16,6 +16,8 @@ export interface StorageProvider {
   write(key: string, data: Buffer): Promise<string>;
   read(key: string): Promise<Buffer>;
   delete(key: string): Promise<void>;
+  /** Removes everything under a key prefix: one visitor's uploads. */
+  deleteFolder(prefix: string): Promise<void>;
   exists(key: string): Promise<boolean>;
   localPath(key: string): string | null;
 }
@@ -60,6 +62,16 @@ export class LocalFilesystemStorage implements StorageProvider {
 
   async delete(key: string): Promise<void> {
     await rm(this.resolveKey(key), { force: true });
+  }
+
+  async deleteFolder(prefix: string): Promise<void> {
+    const target = this.resolveKey(prefix);
+    // resolveKey admits the root itself, which is right for a file lookup and
+    // disastrous for a recursive delete.
+    if (target === this.root) {
+      throw new Error(`Refusing to delete the storage root: ${prefix}`);
+    }
+    await rm(target, { recursive: true, force: true });
   }
 
   async exists(key: string): Promise<boolean> {

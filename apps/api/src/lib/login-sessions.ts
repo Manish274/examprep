@@ -1,9 +1,8 @@
 import { and, eq, gt, inArray, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
 import { documents, loginSessions, refreshTokens, users } from "@examprep/db";
 import { db } from "./db.js";
+import { removeDocument } from "./document-removal.js";
 import { logger } from "./logger.js";
-import { documents as documentQueue } from "./queue.js";
-import { ragDeleteDocument } from "./rag-client.js";
 import { storage } from "./storage.js";
 
 /**
@@ -12,7 +11,7 @@ import { storage } from "./storage.js";
  * A student types a name and starts; that is a visit (a login_sessions row,
  * named "sign-in" throughout the code). Its uploads, chats, quizzes and
  * flashcards belong to it. When it ends -- by leaving, or by its refresh
- * tokens lapsing unused -- all of it is removed: the stored file, the
+ * tokens lapsing unused -- all of it is removed: the stored files, the
  * vectors, the rows, and the visitor. The next start begins from nothing.
  *
  * Removal is not left to the database alone. Rows cascade from the session,
@@ -50,39 +49,8 @@ export async function isLoginSessionLive(id: string): Promise<boolean> {
   return Boolean(row);
 }
 
-/**
- * Removes a batch of documents everywhere they live.
- *
- * Outside stores first, rows last, one document at a time: a failure part way
- * leaves the remaining rows in place for the next sweep to find, rather than
- * leaving files and vectors nothing points at any more.
- */
-async function removeDocuments(
-  rows: { id: string; userId: string; storageKey: string }[],
-): Promise<void> {
-  for (const row of rows) {
-    // A job still waiting would index a file that is about to vanish.
-    await documentQueue()
-      .remove(row.id)
-      .catch(() => undefined);
-
-    await ragDeleteDocument(row.id, row.userId);
-
-    if (row.storageKey) {
-      await storage()
-        .delete(row.storageKey)
-        .catch((err: unknown) => {
-          logger.warn({ err, documentId: row.id }, "failed to delete stored file");
-        });
-    }
-
-    // Chats scoped to this document, and its quizzes and cards, cascade.
-    await db().delete(documents).where(eq(documents.id, row.id));
-  }
-}
-
 /** Deletes one sign-in and everything that belongs to it. */
-export async function purgeLoginSession(id: string): Promise<void> {
+async function purgeLoginSession(id: string): Promise<void> {
   const owned = await db()
     .select({
       id: documents.id,
@@ -92,28 +60,39 @@ export async function purgeLoginSession(id: string): Promise<void> {
     .from(documents)
     .where(eq(documents.loginSessionId, id));
 
-  await removeDocuments(owned);
+  // One at a time, so a failure part way leaves the remaining rows for the
+  // next sweep to find rather than files and vectors nothing points at.
+  for (const row of owned) {
+    await removeDocument(row);
+  }
 
-  // Everything else -- chats across all documents, refresh tokens -- cascades
+  // Everything else -- chats, quizzes, flashcards, refresh tokens -- cascades
   // from the session row.
   const [ended] = await db()
     .delete(loginSessions)
     .where(eq(loginSessions.id, id))
     .returning({ userId: loginSessions.userId });
 
-  // A visitor is only a name for the length of one visit. Once it is over
-  // nothing can sign back in as them, so the row goes too -- unless it is an
-  // account from before names replaced passwords.
+  // A visitor is only a name for the length of one visit, and nothing can
+  // sign back in as them once it is over. Their traces cascade with the row,
+  // and their upload folder goes with it.
   if (ended) {
-    await db()
+    const [gone] = await db()
       .delete(users)
       .where(
         and(
           eq(users.id, ended.userId),
-          isNull(users.email),
           sql`not exists (select 1 from login_sessions where user_id = ${ended.userId})`,
         ),
-      );
+      )
+      .returning({ id: users.id });
+    if (gone) {
+      await storage()
+        .deleteFolder(gone.id)
+        .catch((err: unknown) => {
+          logger.warn({ err, userId: gone.id }, "failed to delete upload folder");
+        });
+    }
   }
   logger.info({ loginSessionId: id, documents: owned.length }, "session cleared");
 }
@@ -145,7 +124,7 @@ export async function endLoginSession(id: string): Promise<void> {
  * used: a student who closes the tab and never returns is gone once their
  * last token lapses, without having to press anything.
  */
-export async function sweepLoginSessions(now = new Date()): Promise<number> {
+async function sweepLoginSessions(now = new Date()): Promise<number> {
   const live = db()
     .select({ id: refreshTokens.id })
     .from(refreshTokens)

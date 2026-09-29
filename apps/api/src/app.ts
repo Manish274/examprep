@@ -13,14 +13,12 @@ import { traceRoutes } from "./routes/traces.js";
 import { retrievalRoutes } from "./routes/retrieval.js";
 import { consoleRoutes } from "./routes/console.js";
 import { notFound } from "./lib/errors.js";
+import { env } from "./env.js";
 import type { AppEnv } from "./types.js";
 
 /**
- * Builds the Hono app. Kept free of side effects and server binding so tests
- * can exercise routes through `app.request()` without opening a port.
- */
-/**
- * Builds the REST app.
+ * Builds the REST app, free of side effects and server binding so tests can
+ * exercise routes through `app.request()` without opening a port.
  *
  * The WebSocket route is added by the entrypoint rather than here: the
  * upgrader has to be constructed from this app instance and then bound to the
@@ -35,7 +33,7 @@ export function createApp() {
   app.use(
     "*",
     cors({
-      origin: ["http://localhost:3000"],
+      origin: [env().WEB_ORIGIN],
       credentials: true,
       allowHeaders: ["content-type", "authorization", "x-request-id"],
     }),
@@ -59,5 +57,3 @@ export function createApp() {
 
   return app;
 }
-
-export type App = ReturnType<typeof createApp>;

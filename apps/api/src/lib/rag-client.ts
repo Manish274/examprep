@@ -12,7 +12,7 @@ export interface RagRequestOptions {
   timeoutMs?: number;
 }
 
-export async function ragFetch<T>(
+async function ragFetch<T>(
   path: string,
   init: RequestInit = {},
   options: RagRequestOptions = {},

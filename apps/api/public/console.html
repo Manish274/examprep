@@ -620,7 +620,7 @@ function handleFrame(frame) {
       const cell = $(`prog-${frame.documentId}`);
       if (cell) {
         const p = frame.progress || {};
-        cell.textContent = `${p.stage ?? "…"} ${p.percent ?? 0}%`;
+        cell.textContent = `${p.stage ?? "…"}${p.percent === undefined ? "" : ` ${p.percent}%`}`;
       }
       if (frame.progress?.stage === "completed") void loadDocuments();
       break;

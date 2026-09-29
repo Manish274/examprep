@@ -7,7 +7,7 @@ import { db } from "../lib/db.js";
 import { detectKind, EXTENSION_FOR_KIND } from "../lib/file-type.js";
 import { documents as documentQueue } from "../lib/queue.js";
 import { sha256, storage, storageKeyFor } from "../lib/storage.js";
-import { ragDeleteDocument } from "../lib/rag-client.js";
+import { removeDocument } from "../lib/document-removal.js";
 import { logger } from "../lib/logger.js";
 import {
   badRequest,
@@ -78,7 +78,12 @@ export const documentRoutes = new Hono<AppEnv>()
 
     const contentHash = sha256(data);
     const [duplicate] = await db()
-      .select({ id: documents.id, status: documents.status })
+      .select({
+        id: documents.id,
+        userId: documents.userId,
+        storageKey: documents.storageKey,
+        status: documents.status,
+      })
       .from(documents)
       .where(
         and(
@@ -92,8 +97,10 @@ export const documentRoutes = new Hono<AppEnv>()
       // A failed row must not block the retry. Otherwise a document that hit a
       // bug -- or a rate limit -- is permanently un-uploadable: "we could not
       // process this" followed by "you have already uploaded this" is a dead
-      // end with no way out but a database prompt.
-      await db().delete(documents).where(eq(documents.id, duplicate.id));
+      // end with no way out but a database prompt. Removed properly rather
+      // than just the row: a failure part way through indexing can leave a
+      // stored file and some vectors behind.
+      await removeDocument(duplicate);
       logger.info(
         { documentId: duplicate.id },
         "replacing a failed document with a fresh upload",
@@ -224,10 +231,12 @@ export const documentRoutes = new Hono<AppEnv>()
     const [owned] = await db()
       .select({ id: documents.id })
       .from(documents)
-      .where(and(
+      .where(
+        and(
           eq(documents.id, documentId),
           eq(documents.loginSessionId, currentLoginSessionId(c)),
-        ),)
+        ),
+      )
       .limit(1);
 
     if (!owned) {
@@ -244,43 +253,25 @@ export const documentRoutes = new Hono<AppEnv>()
   })
 
   .delete("/:id", validate("param", idParamSchema), async (c) => {
-    const userId = currentUserId(c);
-    const documentId = c.req.valid("param").id;
-
     const [row] = await db()
-      .select({ id: documents.id, storageKey: documents.storageKey })
+      .select({
+        id: documents.id,
+        userId: documents.userId,
+        storageKey: documents.storageKey,
+      })
       .from(documents)
-      .where(and(
-          eq(documents.id, documentId),
+      .where(
+        and(
+          eq(documents.id, c.req.valid("param").id),
           eq(documents.loginSessionId, currentLoginSessionId(c)),
-        ),)
+        ),
+      )
       .limit(1);
 
     if (!row) {
       throw notFound("Document");
     }
 
-    // Vectors live outside Postgres and do not cascade. Dropping them first
-    // means a failure here leaves the document visible and retryable, rather
-    // than leaving orphaned vectors that keep answering the student's
-    // questions about material they deleted.
-    await ragDeleteDocument(documentId, userId).catch((err: unknown) => {
-      logger.error(
-        { err, documentId },
-        "failed to delete vectors; index may hold orphans",
-      );
-    });
-
-    // Chunks cascade with the row. The stored file does not, so remove it
-    // too: a leaked row is recoverable, a leaked file is not noticed.
-    if (row.storageKey) {
-      await storage()
-        .delete(row.storageKey)
-        .catch((err: unknown) => {
-          logger.warn({ err, documentId }, "failed to delete stored file");
-        });
-    }
-
-    await db().delete(documents).where(eq(documents.id, documentId));
+    await removeDocument(row);
     return c.body(null, 204);
   });

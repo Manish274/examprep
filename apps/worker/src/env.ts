@@ -13,18 +13,11 @@ const envSchema = z.object({
   RAG_SERVICE_URL: z.string().url(),
   INTERNAL_SERVICE_TOKEN: z.string().min(8),
 
-  STORAGE_LOCAL_PATH: z.string().default("./storage/uploads"),
-
-  /** How many documents this worker processes at once. */
-  WORKER_CONCURRENCY: z.coerce.number().int().positive().default(2),
-
   /**
-   * Free-tier quotas are the real constraint on ingestion throughput. The
-   * worker throttles itself to stay under them, so a large upload gets slower
-   * rather than failing.
+   * How many documents this worker processes at once. Provider quotas, not
+   * CPU, bound ingestion; the RAG service does the rate limiting itself.
    */
-  EMBEDDING_MAX_RPM: z.coerce.number().int().positive().default(100),
-  LLM_MAX_RPM: z.coerce.number().int().positive().default(15),
+  WORKER_CONCURRENCY: z.coerce.number().int().positive().default(2),
 });
 
 export type Env = z.infer<typeof envSchema>;

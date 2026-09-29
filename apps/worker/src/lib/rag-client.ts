@@ -76,108 +76,24 @@ export function describeFailure(status: number, body: string): string {
   return `Document processing failed (${status}): ${body.slice(0, 300)}`;
 }
 
-export interface IngestRequest {
-  documentId: string;
-  userId: string;
-  filename: string;
-  kind: "pdf" | "pptx" | "ppt";
-  storageKey: string;
-  chunker?: string;
-}
-
-export async function ingest(
-  request: IngestRequest,
-  options: { correlationId?: string; timeoutMs?: number } = {},
-): Promise<IngestResponse> {
-  const { RAG_SERVICE_URL, INTERNAL_SERVICE_TOKEN } = env();
-  // Parsing a large deck is slow, and this call is already inside a background
-  // job, so the timeout is generous.
-  const timeoutMs = options.timeoutMs ?? 300_000;
-
-  const controller = new AbortController();
-  const timer = setTimeout(() => {
-    controller.abort();
-  }, timeoutMs);
-
-  try {
-    const response = await fetch(new URL("/ingest", RAG_SERVICE_URL), {
-      method: "POST",
-      signal: controller.signal,
-      headers: {
-        "content-type": "application/json",
-        "x-internal-token": INTERNAL_SERVICE_TOKEN,
-        ...(options.correlationId
-          ? { "x-correlation-id": options.correlationId }
-          : {}),
-      },
-      body: JSON.stringify({
-        document_id: request.documentId,
-        user_id: request.userId,
-        filename: request.filename,
-        kind: request.kind,
-        storage_key: request.storageKey,
-        ...(request.chunker ? { chunker: request.chunker } : {}),
-      }),
-    });
-
-    if (!response.ok) {
-      const body = await response.text().catch(() => "");
-      const message = describeFailure(response.status, body);
-
-      // 4xx means the request or the document is the problem; retrying wastes
-      // three attempts and delays the failure the student needs to see.
-      if (response.status >= 400 && response.status < 500) {
-        throw new RagPermanentError(message, response.status);
-      }
-      throw new Error(message);
-    }
-
-    return (await response.json()) as IngestResponse;
-  } catch (err) {
-    if (err instanceof Error && err.name === "AbortError") {
-      throw new Error(`RAG ingest timed out after ${timeoutMs}ms`);
-    }
-    throw err;
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-// ── study generation ────────────────────────────────────────
-
-export interface GeneratedQuestion {
-  type: "mcq" | "short_answer" | "true_false";
-  prompt: string;
-  options: string[] | null;
-  correct_answer: string;
-  explanation: string;
-  source_chunk_id: string;
-}
-
-export interface GeneratedCard {
-  front: string;
-  back: string;
-  source_chunk_id: string;
-}
-
+/**
+ * POSTs to the RAG service and returns its JSON.
+ *
+ * A 4xx is a RagPermanentError -- the request or the document is the problem,
+ * and retrying wastes attempts while delaying the failure the student needs
+ * to see. Anything else is a plain Error, which the job retries.
+ */
 async function post<T>(
   path: string,
   body: unknown,
-  options: { correlationId?: string; timeoutMs?: number } = {},
+  options: { correlationId?: string; timeoutMs: number },
 ): Promise<T> {
   const { RAG_SERVICE_URL, INTERNAL_SERVICE_TOKEN } = env();
-  // Generation is several rate-limited model calls, so the ceiling is high.
-  const timeoutMs = options.timeoutMs ?? 900_000;
-
-  const controller = new AbortController();
-  const timer = setTimeout(() => {
-    controller.abort();
-  }, timeoutMs);
 
   try {
     const response = await fetch(new URL(path, RAG_SERVICE_URL), {
       method: "POST",
-      signal: controller.signal,
+      signal: AbortSignal.timeout(options.timeoutMs),
       headers: {
         "content-type": "application/json",
         "x-internal-token": INTERNAL_SERVICE_TOKEN,
@@ -199,25 +115,71 @@ async function post<T>(
 
     return (await response.json()) as T;
   } catch (err) {
-    if (err instanceof Error && err.name === "AbortError") {
-      throw new Error(`${path} timed out after ${timeoutMs}ms`);
+    if (err instanceof Error && err.name === "TimeoutError") {
+      throw new Error(`${path} timed out after ${options.timeoutMs}ms`);
     }
     throw err;
-  } finally {
-    clearTimeout(timer);
   }
 }
+
+/**
+ * Parses, chunks, embeds and indexes one stored document.
+ *
+ * Slow on a large deck under free-tier limits, and already inside a background
+ * job, so the timeout is generous.
+ */
+export const ingest = (
+  request: {
+    documentId: string;
+    userId: string;
+    filename: string;
+    kind: "pdf" | "pptx" | "ppt";
+    storageKey: string;
+  },
+  options: { correlationId?: string } = {},
+): Promise<IngestResponse> =>
+  post(
+    "/ingest",
+    {
+      document_id: request.documentId,
+      user_id: request.userId,
+      filename: request.filename,
+      kind: request.kind,
+      storage_key: request.storageKey,
+    },
+    { timeoutMs: 300_000, ...options },
+  );
 
 /** Drops a document's vectors from the index. */
 export const deleteVectors = (
   request: { documentId: string; userId: string },
-  options?: { correlationId?: string },
+  options: { correlationId?: string } = {},
 ): Promise<{ document_id: string; removed: number }> =>
   post(
     "/documents/delete",
     { document_id: request.documentId, user_id: request.userId },
     { timeoutMs: 30_000, ...options },
   );
+
+// ── study generation ────────────────────────────────────────
+
+export interface GeneratedQuestion {
+  type: "mcq" | "short_answer" | "true_false";
+  prompt: string;
+  options: string[] | null;
+  correct_answer: string;
+  explanation: string;
+  source_chunk_id: string;
+}
+
+export interface GeneratedCard {
+  front: string;
+  back: string;
+  source_chunk_id: string;
+}
+
+/** Generation is several rate-limited model calls, so the ceiling is high. */
+const GENERATION_TIMEOUT_MS = 900_000;
 
 export const generateTest = (
   request: {
@@ -227,7 +189,7 @@ export const generateTest = (
     types?: string[] | undefined;
     difficulty?: string | undefined;
   },
-  options?: { correlationId?: string },
+  options: { correlationId?: string } = {},
 ): Promise<{ questions: GeneratedQuestion[]; stats: Record<string, number> }> =>
   post(
     "/generate/test",
@@ -238,12 +200,12 @@ export const generateTest = (
       ...(request.types ? { types: request.types } : {}),
       ...(request.difficulty ? { difficulty: request.difficulty } : {}),
     },
-    options,
+    { timeoutMs: GENERATION_TIMEOUT_MS, ...options },
   );
 
 export const generateFlashcards = (
   request: { userId: string; documentIds: string[]; cardCount: number },
-  options?: { correlationId?: string },
+  options: { correlationId?: string } = {},
 ): Promise<{ cards: GeneratedCard[]; stats: Record<string, number> }> =>
   post(
     "/generate/flashcards",
@@ -252,30 +214,5 @@ export const generateFlashcards = (
       document_ids: request.documentIds,
       card_count: request.cardCount,
     },
-    options,
+    { timeoutMs: GENERATION_TIMEOUT_MS, ...options },
   );
-
-export interface GradableAnswerInput {
-  question_id: string;
-  question_type: string;
-  prompt: string;
-  correct_answer: string;
-  explanation: string;
-  response: string | null;
-  options: string[] | null;
-  source_text: string;
-}
-
-export interface GradedAnswer {
-  question_id: string;
-  is_correct: boolean;
-  awarded: number;
-  feedback: string;
-}
-
-/** Grading blocks the student, so its ceiling is far lower than generation. */
-export const gradeAnswers = (
-  answers: GradableAnswerInput[],
-  options?: { correlationId?: string },
-): Promise<{ graded: GradedAnswer[]; score: number; max_score: number }> =>
-  post("/grade", { answers }, { ...options, timeoutMs: 180_000 });

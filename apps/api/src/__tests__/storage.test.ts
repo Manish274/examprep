@@ -49,6 +49,15 @@ describe("LocalFilesystemStorage", () => {
     await expect(storage.delete("gone.pdf")).resolves.toBeUndefined();
   });
 
+  it("deletes a visitor's folder, and never the root", async () => {
+    await storage.write("user-1/a.pdf", Buffer.from("x"));
+    await storage.write("user-2/b.pdf", Buffer.from("y"));
+    await storage.deleteFolder("user-1");
+    expect(await readdir(root)).toEqual(["user-2"]);
+    await expect(storage.deleteFolder(".")).rejects.toThrow();
+    expect(await storage.exists("user-2/b.pdf")).toBe(true);
+  });
+
   describe("key validation", () => {
     // Keys come from database rows, but treating them as trusted is how a
     // traversal gets in.

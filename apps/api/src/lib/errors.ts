@@ -22,9 +22,6 @@ export const badRequest = (message: string, details?: unknown): AppError =>
 export const unauthorized = (message = "Authentication required"): AppError =>
   new AppError("unauthorized", message, 401);
 
-export const forbidden = (message = "Not permitted"): AppError =>
-  new AppError("forbidden", message, 403);
-
 export const notFound = (resource = "Resource"): AppError =>
   new AppError("not_found", `${resource} not found`, 404);
 

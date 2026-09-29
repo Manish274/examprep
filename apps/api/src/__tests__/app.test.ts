@@ -9,7 +9,6 @@ beforeAll(() => {
     RAG_SERVICE_URL: "http://localhost:8000",
     INTERNAL_SERVICE_TOKEN: "dev_internal_token",
     JWT_ACCESS_SECRET: "a".repeat(32),
-    JWT_REFRESH_SECRET: "b".repeat(32),
     NODE_ENV: "test",
   });
 });

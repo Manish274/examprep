@@ -2,35 +2,41 @@ import type { Job } from "bullmq";
 import type { Redis } from "ioredis";
 import { eq } from "drizzle-orm";
 import { documentChunks, documents } from "@examprep/db";
-import type { DocumentProcessingJob } from "@examprep/shared";
+import {
+  documentProcessingJobSchema,
+  type DocumentProcessingJob,
+  type JobProgress,
+} from "@examprep/shared";
 import { db } from "../lib/db.js";
 import { logger } from "../lib/logger.js";
-import { overallPercent, publishProgress } from "../lib/progress.js";
-import {
-  deleteVectors,
-  ingest,
-  RagPermanentError,
-} from "../lib/rag-client.js";
+import { publishDocumentProgress } from "../lib/progress.js";
+import { deleteVectors, ingest, RagPermanentError } from "../lib/rag-client.js";
+
+/** Chunk rows per insert, so a large document stays under the parameter limit. */
+const INSERT_BATCH = 200;
 
 /**
  * Runs one document through ingestion.
  *
- * The worker owns sequencing, progress and persistence; the RAG service owns
- * parsing and chunking. Chunks come back over HTTP and are written here,
- * because Postgres belongs to the Node side.
+ * The RAG service parses, chunks, embeds and indexes the file in a single
+ * call, and hands the chunks back; the worker owns sequencing, progress and
+ * persistence, because Postgres belongs to the Node side.
  *
- * Milestone 2 adds embedding and Qdrant indexing between chunking and ready.
+ * So there are two stages a student can be told about: `parsing`, which is
+ * that one call and has no fraction to report, and `indexing`, which is the
+ * chunks being stored here and is counted.
  */
 export async function processDocument(
   job: Job<DocumentProcessingJob>,
   publisher: Redis,
 ): Promise<void> {
-  const { documentId, userId, storageKey, filename, kind } = job.data;
+  const { documentId, userId, storageKey, filename, kind } =
+    documentProcessingJobSchema.parse(job.data);
   const log = logger.child({ jobId: job.id, documentId, filename });
 
   const setStatus = async (
-    status: "parsing" | "chunking" | "indexing" | "ready" | "failed",
-    fields: Record<string, unknown> = {},
+    status: "parsing" | "indexing" | "ready" | "failed",
+    fields: Partial<typeof documents.$inferInsert> = {},
   ): Promise<void> => {
     await db()
       .update(documents)
@@ -38,28 +44,14 @@ export async function processDocument(
       .where(eq(documents.id, documentId));
   };
 
-  const report = async (
-    stage: "parsing" | "chunking" | "indexing" | "completed" | "failed",
-    current: number,
-    total: number,
-    message?: string,
-  ): Promise<void> => {
-    const percent = overallPercent(stage, current, total);
-    await publishProgress(publisher, documentId, {
-      stage,
-      percent,
-      ...(message ? { message } : {}),
-      current,
-      total,
-    });
-    await job.updateProgress(percent);
-  };
+  const report = (progress: JobProgress): Promise<void> =>
+    publishDocumentProgress(publisher, { documentId, progress });
 
   log.info("processing started");
 
   try {
     await setStatus("parsing");
-    await report("parsing", 0, 1, `Reading ${filename}`);
+    await report({ stage: "parsing", message: `Reading ${filename}` });
 
     const result = await ingest(
       { documentId, userId, filename, kind, storageKey },
@@ -80,9 +72,9 @@ export async function processDocument(
       "parsed, embedded and indexed",
     );
 
-    // The student may have signed out while this ran, and their upload been
-    // deleted. The vectors were written regardless; left there, they would
-    // outlive everything that points at them.
+    // The student may have ended their session while this ran, and their
+    // upload been deleted. The vectors were written regardless; left there,
+    // they would outlive everything that points at them.
     const [stillWanted] = await db()
       .select({ id: documents.id })
       .from(documents)
@@ -94,50 +86,42 @@ export async function processDocument(
       return;
     }
 
-    await setStatus("chunking", { pageCount: result.page_count });
-    await report("chunking", 1, 1, `${result.chunk_count} chunks`);
-
-    await setStatus("indexing");
-    await report("indexing", 0, result.chunk_count, "Storing chunks");
+    await setStatus("indexing", { pageCount: result.page_count });
+    await report({ stage: "indexing", percent: 0, message: "Storing chunks" });
 
     // Replace rather than append: a retried job must not double the chunks.
     await db()
       .delete(documentChunks)
       .where(eq(documentChunks.documentId, documentId));
 
-    if (result.chunks.length > 0) {
-      // Chunked inserts keep a large document from exceeding the parameter
-      // limit of a single statement.
-      const BATCH = 200;
-      for (let i = 0; i < result.chunks.length; i += BATCH) {
-        const slice = result.chunks.slice(i, i + BATCH);
-        await db()
-          .insert(documentChunks)
-          .values(
-            slice.map((chunk) => ({
-              id: chunk.id,
-              documentId,
-              userId,
-              chunkIndex: chunk.chunk_index,
-              text: chunk.text,
-              tokenCount: chunk.token_count,
-              contentHash: chunk.content_hash,
-              pageNumber: chunk.page_number,
-              slideNumber: chunk.slide_number,
-              section: chunk.section,
-              heading: chunk.heading,
-              headingPath: chunk.heading_path,
-              charStart: chunk.char_start,
-              charEnd: chunk.char_end,
-              source: chunk.source,
-            })),
-          );
-        await report(
-          "indexing",
-          Math.min(i + BATCH, result.chunks.length),
-          result.chunks.length,
+    for (let i = 0; i < result.chunks.length; i += INSERT_BATCH) {
+      const slice = result.chunks.slice(i, i + INSERT_BATCH);
+      await db()
+        .insert(documentChunks)
+        .values(
+          slice.map((chunk) => ({
+            id: chunk.id,
+            documentId,
+            userId,
+            chunkIndex: chunk.chunk_index,
+            text: chunk.text,
+            tokenCount: chunk.token_count,
+            contentHash: chunk.content_hash,
+            pageNumber: chunk.page_number,
+            slideNumber: chunk.slide_number,
+            section: chunk.section,
+            heading: chunk.heading,
+            headingPath: chunk.heading_path,
+            charStart: chunk.char_start,
+            charEnd: chunk.char_end,
+            source: chunk.source,
+          })),
         );
-      }
+      const stored = Math.min(i + INSERT_BATCH, result.chunks.length);
+      await report({
+        stage: "indexing",
+        percent: Math.round((stored / result.chunks.length) * 100),
+      });
     }
 
     await setStatus("ready", {
@@ -155,13 +139,13 @@ export async function processDocument(
         ...result.metadata,
       },
     });
-    await report("completed", 1, 1, "Ready");
+    await report({ stage: "completed", percent: 100, message: "Ready" });
 
     log.info({ chunks: result.chunk_count }, "processing complete");
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     const permanent = err instanceof RagPermanentError;
-    const finalAttempt = (job.attemptsMade ?? 0) + 1 >= (job.opts.attempts ?? 1);
+    const finalAttempt = job.attemptsMade + 1 >= (job.opts.attempts ?? 1);
 
     log.error({ err: message, permanent, finalAttempt }, "processing failed");
 
@@ -169,11 +153,7 @@ export async function processDocument(
     // outage does not show the student a permanent error mid-way.
     if (permanent || finalAttempt) {
       await setStatus("failed", { errorMessage: message.slice(0, 1000) });
-      await publishProgress(publisher, documentId, {
-        stage: "failed",
-        percent: 0,
-        message,
-      });
+      await report({ stage: "failed", message });
     }
 
     if (permanent) {

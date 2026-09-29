@@ -11,8 +11,8 @@ import type { AppEnv } from "../types.js";
  *
  * Served from this API rather than opened as a file or hosted separately, for
  * one reason that matters: same origin. No CORS entry to maintain, and the
- * WebSocket at /ws upgrades without any extra allowance — the console speaks
- * exactly the protocol the real frontend will, with nothing loosened to let it.
+ * WebSocket at /ws upgrades without any extra allowance -- the console speaks
+ * exactly the protocol the web app does, with nothing loosened to let it.
  *
  * Read from disk per request rather than cached at import, so editing the page
  * only needs a browser refresh.

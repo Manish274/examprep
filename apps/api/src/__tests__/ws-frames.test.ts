@@ -13,7 +13,6 @@ beforeAll(() => {
     RAG_SERVICE_URL: "http://localhost:8000",
     INTERNAL_SERVICE_TOKEN: "dev_internal_token",
     JWT_ACCESS_SECRET: "a".repeat(32),
-    JWT_REFRESH_SECRET: "b".repeat(32),
     NODE_ENV: "test",
   });
 });
@@ -67,7 +66,8 @@ describe("websocket frame ordering", () => {
           data: JSON.stringify({
             // A frame that requires a completed handshake, so this fails loudly
             // if it overtakes the token check rather than passing vacuously.
-            type: "subscribe:document",
+            // Unsubscribing needs no database, which subscribing now does.
+            type: "unsubscribe:document",
             documentId: "8f14e45f-ceea-4c2a-9c1e-1b2a3c4d5e6f",
           }),
         } as MessageEvent,

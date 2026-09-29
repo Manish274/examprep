@@ -14,5 +14,3 @@ export const logger = pino({
     : {}),
   base: { service: "api" },
 });
-
-export type Logger = typeof logger;

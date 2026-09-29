@@ -1,8 +1,9 @@
 import { z } from "zod";
-import { uuidSchema } from "../schemas/common.js";
-import { documentStatusSchema } from "../schemas/documents.js";
-import { jobProgressSchema } from "../schemas/jobs.js";
-import { sourceSchema } from "../schemas/chunks.js";
+import { explanationModeSchema, uuidSchema } from "../schemas/common.js";
+import {
+  documentProgressSchema,
+  generationProgressSchema,
+} from "../schemas/jobs.js";
 
 /**
  * WebSocket protocol between browser and the Node API.
@@ -10,6 +11,19 @@ import { sourceSchema } from "../schemas/chunks.js";
  * Every frame is a discriminated union on `type`, so both ends can exhaustively
  * switch and the compiler catches an unhandled case.
  */
+
+/** A citation as surfaced to the browser, keyed by its [S1] marker. */
+export const sourceSchema = z.object({
+  marker: z.string(),
+  chunkId: uuidSchema,
+  documentId: uuidSchema,
+  documentName: z.string(),
+  pageNumber: z.number().int().positive().nullable(),
+  slideNumber: z.number().int().positive().nullable(),
+  headingPath: z.array(z.string()).default([]),
+  snippet: z.string(),
+});
+export type Source = z.infer<typeof sourceSchema>;
 
 // ── client → server ─────────────────────────────────────────
 export const clientEventSchema = z.discriminatedUnion("type", [
@@ -31,7 +45,7 @@ export const clientEventSchema = z.discriminatedUnion("type", [
     type: z.literal("chat:send"),
     sessionId: uuidSchema,
     content: z.string().min(1).max(4000),
-    mode: z.enum(["simple", "detailed", "exam"]).default("detailed"),
+    mode: explanationModeSchema.default("detailed"),
   }),
   z.object({ type: z.literal("cancel"), sessionId: uuidSchema }),
   z.object({
@@ -48,17 +62,7 @@ export const serverEventSchema = z.discriminatedUnion("type", [
     type: z.literal("ready"),
     userId: uuidSchema,
   }),
-  z.object({
-    type: z.literal("document:progress"),
-    documentId: uuidSchema,
-    progress: jobProgressSchema,
-  }),
-  z.object({
-    type: z.literal("document:status"),
-    documentId: uuidSchema,
-    status: documentStatusSchema,
-    errorMessage: z.string().nullable().optional(),
-  }),
+  documentProgressSchema.extend({ type: z.literal("document:progress") }),
   z.object({
     type: z.literal("chat:token"),
     sessionId: uuidSchema,
@@ -71,15 +75,7 @@ export const serverEventSchema = z.discriminatedUnion("type", [
     messageId: uuidSchema,
     sources: z.array(sourceSchema),
   }),
-  z.object({
-    type: z.literal("generation:progress"),
-    targetId: uuidSchema,
-    kind: z.enum(["test", "flashcards"]),
-    status: z.enum(["generating", "ready", "failed"]),
-    produced: z.number().int().nonnegative().default(0),
-    total: z.number().int().nonnegative().default(0),
-    message: z.string().optional(),
-  }),
+  generationProgressSchema.extend({ type: z.literal("generation:progress") }),
   z.object({
     type: z.literal("chat:start"),
     sessionId: uuidSchema,
@@ -114,11 +110,3 @@ export const serverEventSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("pong") }),
 ]);
 export type ServerEvent = z.infer<typeof serverEventSchema>;
-
-/** Redis pub/sub channel carrying worker progress back to the API's WS hub. */
-export const documentChannel = (documentId: string): string =>
-  `doc:progress:${documentId}`;
-
-/** Redis channel carrying generation progress back to the WebSocket hub. */
-export const generationChannel = (targetId: string): string =>
-  `gen:progress:${targetId}`;

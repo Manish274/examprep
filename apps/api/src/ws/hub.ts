@@ -3,13 +3,18 @@ import { and, desc, eq, inArray, ne } from "drizzle-orm";
 import {
   chatSessions,
   documentChunks,
+  documents,
+  flashcardSets,
   messageSources,
   messages,
+  tests,
 } from "@examprep/db";
 import {
   clientEventSchema,
   documentChannel,
+  documentProgressSchema,
   generationChannel,
+  generationProgressSchema,
   type ClientEvent,
   type ServerEvent,
 } from "@examprep/shared";
@@ -89,11 +94,12 @@ function fail(socket: WSContext, code: string, message: string): void {
 }
 
 /**
- * Relays worker progress from Redis onto every socket watching that document.
+ * Relays worker progress from Redis onto every socket watching it.
  *
  * The worker cannot hold a socket to the student -- it is a separate process
  * and the student may not even be connected -- so it publishes, and this
- * forwards.
+ * forwards. Each message is checked against the shared schema on the way
+ * through: the browser is told only what the protocol promises it.
  */
 function ensureSubscriber(): Redis {
   if (subscriber) return subscriber;
@@ -102,55 +108,65 @@ function ensureSubscriber(): Redis {
   void subscriber.psubscribe("doc:progress:*", "gen:progress:*");
 
   subscriber.on("pmessage", (_pattern, channel, payload) => {
-    let parsed: {
-      documentId?: string;
-      progress?: unknown;
-      targetId?: string;
-      kind?: string;
-      status?: string;
-      produced?: number;
-      total?: number;
-      message?: string;
-    };
+    let message: unknown;
     try {
-      parsed = JSON.parse(payload) as typeof parsed;
+      message = JSON.parse(payload);
     } catch {
       return;
     }
-    const documentId = parsed.documentId;
-    if (documentId && channel === documentChannel(documentId)) {
+
+    const document = documentProgressSchema.safeParse(message);
+    if (document.success && channel === documentChannel(document.data.documentId)) {
       for (const connection of connections.values()) {
-        if (!connection.userId || !connection.watching.has(documentId)) continue;
-        send(connection.socket, {
-          type: "document:progress",
-          documentId,
-          // Shape is validated by the worker before publishing.
-          progress: parsed.progress as never,
-        });
+        if (!connection.watching.has(document.data.documentId)) continue;
+        send(connection.socket, { type: "document:progress", ...document.data });
       }
       return;
     }
 
-    const targetId = parsed.targetId;
-    if (!targetId || channel !== generationChannel(targetId)) return;
-
-    for (const connection of connections.values()) {
-      if (!connection.userId || !connection.watchingGeneration.has(targetId)) {
-        continue;
+    const generation = generationProgressSchema.safeParse(message);
+    if (generation.success && channel === generationChannel(generation.data.targetId)) {
+      for (const connection of connections.values()) {
+        if (!connection.watchingGeneration.has(generation.data.targetId)) continue;
+        send(connection.socket, { type: "generation:progress", ...generation.data });
       }
-      send(connection.socket, {
-        type: "generation:progress",
-        targetId,
-        kind: parsed.kind as never,
-        status: parsed.status as never,
-        produced: Number(parsed.produced ?? 0),
-        total: Number(parsed.total ?? 0),
-        ...(parsed.message ? { message: String(parsed.message) } : {}),
-      });
     }
   });
 
   return subscriber;
+}
+
+/**
+ * Whether this sign-in may follow a document's progress.
+ *
+ * Progress carries the filename and the reason a file failed, so watching one
+ * is scoped exactly like reading it.
+ */
+async function ownsDocument(loginSessionId: string, documentId: string): Promise<boolean> {
+  const [row] = await db()
+    .select({ id: documents.id })
+    .from(documents)
+    .where(and(eq(documents.id, documentId), eq(documents.loginSessionId, loginSessionId)))
+    .limit(1);
+  return Boolean(row);
+}
+
+/** The same, for a test or flashcard set being generated. */
+async function ownsGeneration(loginSessionId: string, targetId: string): Promise<boolean> {
+  const [test] = await db()
+    .select({ id: tests.id })
+    .from(tests)
+    .where(and(eq(tests.id, targetId), eq(tests.loginSessionId, loginSessionId)))
+    .limit(1);
+  if (test) return true;
+  const [set] = await db()
+    .select({ id: flashcardSets.id })
+    .from(flashcardSets)
+    .where(
+      and(eq(flashcardSets.id, targetId), eq(flashcardSets.loginSessionId, loginSessionId)),
+    )
+    .limit(1);
+  return Boolean(set);
 }
 
 /**
@@ -239,7 +255,7 @@ export function deriveTitle(question: string, maxLength = 60): string {
   return `${(lastSpace > maxLength * 0.6 ? cut.slice(0, lastSpace) : cut).trimEnd()}…`;
 }
 
-export const NOTHING_UPLOADED_REPLY =
+const NOTHING_UPLOADED_REPLY =
   "There is nothing uploaded in this session yet. Add a PDF or slide deck " +
   "with the + and ask again -- answers only come from your own material.";
 
@@ -259,8 +275,7 @@ async function handleChat(
   connection: Connection,
   event: Extract<ClientEvent, { type: "chat:send" }>,
 ): Promise<void> {
-  const userId = connection.userId;
-  const loginSessionId = connection.loginSessionId;
+  const { userId, loginSessionId } = connection;
   if (!userId || !loginSessionId) return;
 
   const [session] = await db()
@@ -480,20 +495,29 @@ async function dispatch(
   }
 
   // Everything below requires a completed handshake.
-  if (!connection.userId) {
+  const loginSessionId = connection.loginSessionId;
+  if (!loginSessionId) {
     fail(connection.socket, "unauthorized", "Send an auth frame first");
     return;
   }
 
   switch (event.type) {
     case "subscribe:document":
-      connection.watching.add(event.documentId);
+      if (await ownsDocument(loginSessionId, event.documentId)) {
+        connection.watching.add(event.documentId);
+      } else {
+        fail(connection.socket, "not_found", "Document not found");
+      }
       break;
     case "unsubscribe:document":
       connection.watching.delete(event.documentId);
       break;
     case "subscribe:generation":
-      connection.watchingGeneration.add(event.targetId);
+      if (await ownsGeneration(loginSessionId, event.targetId)) {
+        connection.watchingGeneration.add(event.targetId);
+      } else {
+        fail(connection.socket, "not_found", "Nothing is being generated with that id");
+      }
       break;
     case "cancel":
       // The student navigated away or stopped the answer; abandoning the
@@ -605,5 +629,3 @@ export async function closeHub(): Promise<void> {
     subscriber = null;
   }
 }
-
-export const connectionCount = (): number => connections.size;

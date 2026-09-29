@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 /**
- * Brings the whole stack up with one command, for the console to talk to.
+ * Brings the whole stack up with one command.
  *
  *     npm run dev
  *
- * Four moving parts have to be running before a question can be answered: the
- * containers, the Python RAG service, the Node API and the worker. Starting
- * them by hand in four terminals is the sort of thing that silently ends with
- * three of them running and a confusing error in the fourth.
+ * Five moving parts have to be running before a question can be answered: the
+ * containers, the Python RAG service, the Node API, the worker and the web
+ * app. Starting them by hand in five terminals is the sort of thing that
+ * silently ends with four of them running and a confusing error in the last.
  *
  * Written with no dependencies on purpose. A process runner is a small thing to
  * add and a large thing to explain when it behaves differently on someone
@@ -15,7 +15,7 @@
  */
 
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -77,6 +77,7 @@ function pythonPath() {
  * contains a space. Calling the CLI's own entry point directly avoids both.
  */
 const TSX = join(ROOT, "node_modules", "tsx", "dist", "cli.mjs");
+const TSC = join(ROOT, "node_modules", "typescript", "bin", "tsc");
 
 function start(name, command, args, cwd, env = {}) {
   const child = spawn(command, args, {
@@ -102,8 +103,8 @@ function start(name, command, args, cwd, env = {}) {
   child.on("exit", (code) => {
     if (shuttingDown) return;
     log(name, `exited with code ${code}`);
-    // One service down means the console will fail in a way that looks like a
-    // bug in the pipeline. Take the whole thing down instead.
+    // One service down means the app will fail in a way that looks like a bug
+    // in the pipeline. Take the whole thing down instead.
     shutdown(1);
   });
 
@@ -161,11 +162,29 @@ if (infra.status !== 0) {
 }
 log("dev", "postgres, redis and qdrant are up");
 
-// ── services ───────────────────────────────────────────────
-if (!existsSync(TSX)) {
-  process.stderr.write("tsx is missing — run `npm install` first.\n");
+// ── shared packages ────────────────────────────────────────
+if (!existsSync(TSX) || !existsSync(TSC)) {
+  process.stderr.write("Dependencies are missing — run `npm install` first.\n");
   process.exit(1);
 }
+
+// The API, worker and web app import @examprep/shared and @examprep/db from
+// their build output, so a change to either is only seen once it is rebuilt.
+for (const name of ["shared", "db"]) {
+  const pkg = join(ROOT, "packages", name);
+  rmSync(join(pkg, "dist"), { recursive: true, force: true });
+  const built = spawnSync(process.execPath, [TSC, "-p", join(pkg, "tsconfig.json")], {
+    cwd: pkg,
+    stdio: "inherit",
+  });
+  if (built.status !== 0) {
+    process.stderr.write(`Building packages/${name} failed.\n`);
+    process.exit(1);
+  }
+}
+log("dev", "shared packages built");
+
+// ── services ───────────────────────────────────────────────
 
 const python = pythonPath();
 if (!python) {

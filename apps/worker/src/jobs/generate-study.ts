@@ -7,9 +7,14 @@ import {
   testQuestions,
   tests,
 } from "@examprep/db";
-import { generationChannel, type StudyGenerationJob } from "@examprep/shared";
+import {
+  studyGenerationJobSchema,
+  type GenerationProgress,
+  type StudyGenerationJob,
+} from "@examprep/shared";
 import { db } from "../lib/db.js";
 import { logger } from "../lib/logger.js";
+import { publishGenerationProgress } from "../lib/progress.js";
 import {
   generateFlashcards,
   generateTest,
@@ -28,29 +33,26 @@ export async function generateStudyMaterial(
   job: Job<StudyGenerationJob>,
   publisher: Redis,
 ): Promise<void> {
-  const { kind, targetId, userId, documentId, count } = job.data;
+  const { kind, targetId, userId, documentId, count, questionTypes, difficulty } =
+    studyGenerationJobSchema.parse(job.data);
   const log = logger.child({ jobId: job.id, kind, targetId });
+  const table = kind === "test" ? tests : flashcardSets;
 
-  const publish = async (
-    status: "generating" | "ready" | "failed",
+  const publish = (
+    status: GenerationProgress["status"],
     produced: number,
     message?: string,
-  ): Promise<void> => {
-    await publisher.publish(
-      generationChannel(targetId),
-      JSON.stringify({
-        targetId,
-        kind,
-        status,
-        produced,
-        total: count,
-        ...(message ? { message } : {}),
-      }),
-    );
-  };
+  ): Promise<void> =>
+    publishGenerationProgress(publisher, {
+      targetId,
+      kind,
+      status,
+      produced,
+      total: count,
+      ...(message ? { message } : {}),
+    });
 
   const markFailed = async (message: string): Promise<void> => {
-    const table = kind === "test" ? tests : flashcardSets;
     await db()
       .update(table)
       .set({
@@ -65,7 +67,6 @@ export async function generateStudyMaterial(
   log.info("generation started");
 
   try {
-    const table = kind === "test" ? tests : flashcardSets;
     await db()
       .update(table)
       .set({ status: "generating", updatedAt: new Date() })
@@ -78,8 +79,8 @@ export async function generateStudyMaterial(
           userId,
           documentIds: [documentId],
           questionCount: count,
-          types: job.data.questionTypes,
-          difficulty: job.data.difficulty,
+          types: questionTypes,
+          difficulty,
         },
         { correlationId: job.id },
       );
@@ -151,7 +152,7 @@ export async function generateStudyMaterial(
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     const permanent = err instanceof RagPermanentError;
-    const finalAttempt = (job.attemptsMade ?? 0) + 1 >= (job.opts.attempts ?? 1);
+    const finalAttempt = job.attemptsMade + 1 >= (job.opts.attempts ?? 1);
 
     log.error({ err: message, permanent, finalAttempt }, "generation failed");
 

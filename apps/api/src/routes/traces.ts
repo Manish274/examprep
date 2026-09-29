@@ -11,10 +11,9 @@ import type { AppEnv } from "../types.js";
 /**
  * Reading the trace table back.
  *
- * The RAG service writes spans; nothing until now could read them without a
- * psql prompt. These routes exist so the answer to "why did it cite that
- * passage?" is available to the application -- and later to the student -- and
- * not only to whoever is sitting at the database.
+ * The RAG service writes spans, and these routes read them back, so the
+ * answer to "why did it cite that passage?" is available to the application
+ * and the dev console, not only to whoever is sitting at a psql prompt.
  *
  * Every query is scoped by owner. A correlation id is a message id, so an
  * unscoped lookup would hand one student the retrieval trace of another's

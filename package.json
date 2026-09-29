@@ -13,8 +13,9 @@
   ],
   "scripts": {
     "build": "npm run build --workspaces --if-present",
-    "typecheck": "npm run typecheck --workspaces --if-present",
-    "test": "npm run test --workspaces --if-present",
+    "build:packages": "npm run build -w @examprep/shared -w @examprep/db",
+    "typecheck": "npm run build:packages && npm run typecheck --workspaces --if-present",
+    "test": "npm run build:packages && npm run test --workspaces --if-present",
     "lint": "npm run lint --workspaces --if-present",
     "dev": "node scripts/dev.mjs",
     "dev:api": "npm run dev --workspace @examprep/api",

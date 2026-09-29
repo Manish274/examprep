@@ -31,19 +31,44 @@ export const studyGenerationJobSchema = z.object({
 });
 export type StudyGenerationJob = z.infer<typeof studyGenerationJobSchema>;
 
+// ── progress, worker → Redis → WebSocket hub → browser ─────
+
+/**
+ * Where a document is in processing.
+ *
+ * `parsing` is one call to the RAG service, which reads, chunks, embeds and
+ * indexes the file in a single request, so it has no fraction to report.
+ * `indexing` is the worker storing the chunks it got back, and counts them.
+ */
 export const jobProgressSchema = z.object({
-  stage: z.enum([
-    "parsing",
-    "chunking",
-    "embedding",
-    "indexing",
-    "completed",
-    "failed",
-  ]),
-  /** 0-100. */
-  percent: z.number().min(0).max(100),
+  stage: z.enum(["parsing", "indexing", "completed", "failed"]),
+  /** 0-100 through the current stage, when the stage can measure it. */
+  percent: z.number().min(0).max(100).optional(),
   message: z.string().optional(),
-  current: z.number().int().nonnegative().optional(),
-  total: z.number().int().nonnegative().optional(),
 });
 export type JobProgress = z.infer<typeof jobProgressSchema>;
+
+export const documentProgressSchema = z.object({
+  documentId: uuidSchema,
+  progress: jobProgressSchema,
+});
+export type DocumentProgress = z.infer<typeof documentProgressSchema>;
+
+export const generationProgressSchema = z.object({
+  targetId: uuidSchema,
+  kind: z.enum(["test", "flashcards"]),
+  status: z.enum(["generating", "ready", "failed"]),
+  /** Items produced so far; set once the set is ready. */
+  produced: z.number().int().nonnegative(),
+  total: z.number().int().nonnegative(),
+  message: z.string().optional(),
+});
+export type GenerationProgress = z.infer<typeof generationProgressSchema>;
+
+/** Redis pub/sub channel carrying a document's processing progress. */
+export const documentChannel = (documentId: string): string =>
+  `doc:progress:${documentId}`;
+
+/** Redis pub/sub channel carrying a test's or flashcard set's progress. */
+export const generationChannel = (targetId: string): string =>
+  `gen:progress:${targetId}`;

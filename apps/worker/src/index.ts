@@ -9,19 +9,24 @@ import {
 } from "@examprep/shared";
 import { loadEnv } from "./env.js";
 import { logger } from "./lib/logger.js";
+import { closeDb } from "./lib/db.js";
 import { createQueueConnection } from "./lib/connection.js";
 import { processDocument } from "./jobs/process-document.js";
 import { generateStudyMaterial } from "./jobs/generate-study.js";
 
 const env = loadEnv();
-const connection = createQueueConnection();
+
+// A BullMQ worker blocks on its connection while it waits for jobs, so each
+// worker gets its own, and publishing progress gets a third.
+const documentConnection = createQueueConnection();
+const studyConnection = createQueueConnection();
 const publisher = createQueueConnection();
 
-const worker = new Worker<DocumentProcessingJob>(
+const documentWorker = new Worker<DocumentProcessingJob>(
   QUEUE_DOCUMENT_PROCESSING,
   (job) => processDocument(job, publisher),
   {
-    connection,
+    connection: documentConnection,
     concurrency: env.WORKER_CONCURRENCY,
     // Ingestion is bound by provider quotas, not by CPU. Limiting jobs here
     // keeps the whole system under the free-tier ceiling.
@@ -33,39 +38,43 @@ const studyWorker = new Worker<StudyGenerationJob>(
   QUEUE_STUDY_GENERATION,
   (job) => generateStudyMaterial(job, publisher),
   {
-    connection: createQueueConnection(),
+    connection: studyConnection,
     // One at a time: generation is the heaviest consumer of the LLM quota
     // and running several in parallel simply produces rate limits.
     concurrency: 1,
   },
 );
 
-for (const [name, w] of [["document", worker], ["study", studyWorker]] as const) {
-  w.on("failed", (job, err) => {
+for (const [queue, worker] of [
+  [QUEUE_DOCUMENT_PROCESSING, documentWorker],
+  [QUEUE_STUDY_GENERATION, studyWorker],
+] as const) {
+  worker.on("completed", (job) => {
+    logger.info({ queue, jobId: job.id }, "job completed");
+  });
+  worker.on("failed", (job, err) => {
     logger.error(
-      { queue: name, jobId: job?.id, attempts: job?.attemptsMade, err: err.message },
+      { queue, jobId: job?.id, attempts: job?.attemptsMade, err: err.message },
       "job failed",
     );
   });
 }
 
-worker.on("completed", (job) => {
-  logger.info({ jobId: job.id }, "job completed");
-});
-
-studyWorker.on("completed", (job) => {
-  logger.info({ jobId: job.id }, "generation completed");
-});
-
 logger.info(
-  { queue: QUEUE_DOCUMENT_PROCESSING, concurrency: env.WORKER_CONCURRENCY },
+  { concurrency: env.WORKER_CONCURRENCY },
   "worker listening",
 );
 
 async function shutdown(signal: string): Promise<void> {
   logger.info({ signal }, "shutting down");
-  await Promise.allSettled([worker.close(), studyWorker.close()]);
-  await Promise.allSettled([connection.quit(), publisher.quit()]);
+  // Workers first, so no job starts on a connection that is about to close.
+  await Promise.allSettled([documentWorker.close(), studyWorker.close()]);
+  await Promise.allSettled([
+    documentConnection.quit(),
+    studyConnection.quit(),
+    publisher.quit(),
+    closeDb(),
+  ]);
   process.exit(0);
 }
 

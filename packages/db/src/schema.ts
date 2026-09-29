@@ -12,7 +12,6 @@ import {
   uuid,
   varchar,
 } from "drizzle-orm/pg-core";
-import { relations, sql } from "drizzle-orm";
 
 // ─────────────────────────────────────────────────────────────
 // Enums
@@ -75,25 +74,19 @@ export const attemptStatusEnum = pgEnum("attempt_status", [
 /**
  * Someone using the app. There are no accounts: a student types a name and
  * starts, and each start is a new user whose material lives only as long as
- * that visit. Email and password survive only on rows from before that change.
+ * that visit.
  */
-export const users = pgTable(
-  "users",
-  {
-    id: uuid("id").primaryKey().defaultRandom(),
-    email: varchar("email", { length: 320 }),
-    passwordHash: text("password_hash"),
-    /** The name typed on the start screen. */
-    displayName: varchar("display_name", { length: 120 }),
-    createdAt: timestamp("created_at", { withTimezone: true })
-      .notNull()
-      .defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true })
-      .notNull()
-      .defaultNow(),
-  },
-  (t) => [uniqueIndex("users_email_unique").on(sql`lower(${t.email})`)],
-);
+export const users = pgTable("users", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  /** The name typed on the start screen. */
+  displayName: varchar("display_name", { length: 120 }),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
 
 /**
  * One sign-in, from login until sign-out or until its refresh tokens lapse.
@@ -130,10 +123,9 @@ export const refreshTokens = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
     /** Rotation keeps this, so every token in a chain names one sign-in. */
-    loginSessionId: uuid("login_session_id").references(
-      () => loginSessions.id,
-      { onDelete: "cascade" },
-    ),
+    loginSessionId: uuid("login_session_id")
+      .notNull()
+      .references(() => loginSessions.id, { onDelete: "cascade" }),
     tokenHash: text("token_hash").notNull(),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
     revokedAt: timestamp("revoked_at", { withTimezone: true }),
@@ -159,10 +151,9 @@ export const documents = pgTable(
     userId: uuid("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    loginSessionId: uuid("login_session_id").references(
-      () => loginSessions.id,
-      { onDelete: "cascade" },
-    ),
+    loginSessionId: uuid("login_session_id")
+      .notNull()
+      .references(() => loginSessions.id, { onDelete: "cascade" }),
     filename: text("filename").notNull(),
     kind: documentKindEnum("kind").notNull(),
     /** Opaque key resolved by the active StorageProvider. */
@@ -275,10 +266,9 @@ export const chatSessions = pgTable(
     userId: uuid("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    loginSessionId: uuid("login_session_id").references(
-      () => loginSessions.id,
-      { onDelete: "cascade" },
-    ),
+    loginSessionId: uuid("login_session_id")
+      .notNull()
+      .references(() => loginSessions.id, { onDelete: "cascade" }),
     /** Null means the chat spans every ready document in its sign-in. */
     documentId: uuid("document_id").references(() => documents.id, {
       onDelete: "cascade",
@@ -354,10 +344,9 @@ export const tests = pgTable(
     documentId: uuid("document_id")
       .notNull()
       .references(() => documents.id, { onDelete: "cascade" }),
-    loginSessionId: uuid("login_session_id").references(
-      () => loginSessions.id,
-      { onDelete: "cascade" },
-    ),
+    loginSessionId: uuid("login_session_id")
+      .notNull()
+      .references(() => loginSessions.id, { onDelete: "cascade" }),
     title: text("title").notNull(),
     status: generationStatusEnum("status").notNull().default("pending"),
     questionCount: integer("question_count").notNull().default(0),
@@ -468,10 +457,9 @@ export const flashcardSets = pgTable(
     documentId: uuid("document_id")
       .notNull()
       .references(() => documents.id, { onDelete: "cascade" }),
-    loginSessionId: uuid("login_session_id").references(
-      () => loginSessions.id,
-      { onDelete: "cascade" },
-    ),
+    loginSessionId: uuid("login_session_id")
+      .notNull()
+      .references(() => loginSessions.id, { onDelete: "cascade" }),
     title: text("title").notNull(),
     status: generationStatusEnum("status").notNull().default("pending"),
     cardCount: integer("card_count").notNull().default(0),
@@ -518,15 +506,18 @@ export const flashcards = pgTable(
 
 /**
  * Local trace sink. One row per pipeline step, holding retrieval scores, fusion
- * ranks, rerank deltas, tokens and latency. Langfuse becomes a second Tracer
- * implementation writing the same payload.
+ * ranks, rerank deltas, tokens and latency. Langfuse, when configured, is a
+ * second sink receiving the same payload.
+ *
+ * A trace holds the visitor's questions and excerpts of their uploads, so it
+ * goes with the visitor rather than outliving them with the link cut.
  */
 export const traces = pgTable(
   "traces",
   {
     id: uuid("id").primaryKey().defaultRandom(),
     userId: uuid("user_id").references(() => users.id, {
-      onDelete: "set null",
+      onDelete: "cascade",
     }),
     /** "chat" | "test_generation" | "flashcard_generation" | "eval". */
     kind: varchar("kind", { length: 64 }).notNull(),
@@ -546,77 +537,4 @@ export const traces = pgTable(
     index("traces_correlation_idx").on(t.correlationId),
     index("traces_kind_created_idx").on(t.kind, t.createdAt),
   ],
-);
-
-// ─────────────────────────────────────────────────────────────
-// Relations
-// ─────────────────────────────────────────────────────────────
-
-export const usersRelations = relations(users, ({ many }) => ({
-  documents: many(documents),
-  chatSessions: many(chatSessions),
-  tests: many(tests),
-  flashcardSets: many(flashcardSets),
-  refreshTokens: many(refreshTokens),
-  loginSessions: many(loginSessions),
-}));
-
-export const documentsRelations = relations(documents, ({ one, many }) => ({
-  user: one(users, { fields: [documents.userId], references: [users.id] }),
-  chunks: many(documentChunks),
-}));
-
-export const documentChunksRelations = relations(documentChunks, ({ one }) => ({
-  document: one(documents, {
-    fields: [documentChunks.documentId],
-    references: [documents.id],
-  }),
-}));
-
-export const chatSessionsRelations = relations(
-  chatSessions,
-  ({ one, many }) => ({
-    user: one(users, { fields: [chatSessions.userId], references: [users.id] }),
-    document: one(documents, {
-      fields: [chatSessions.documentId],
-      references: [documents.id],
-    }),
-    messages: many(messages),
-  }),
-);
-
-export const messagesRelations = relations(messages, ({ one, many }) => ({
-  session: one(chatSessions, {
-    fields: [messages.sessionId],
-    references: [chatSessions.id],
-  }),
-  sources: many(messageSources),
-}));
-
-export const testsRelations = relations(tests, ({ one, many }) => ({
-  document: one(documents, {
-    fields: [tests.documentId],
-    references: [documents.id],
-  }),
-  questions: many(testQuestions),
-  attempts: many(testAttempts),
-}));
-
-export const testAttemptsRelations = relations(
-  testAttempts,
-  ({ one, many }) => ({
-    test: one(tests, { fields: [testAttempts.testId], references: [tests.id] }),
-    answers: many(attemptAnswers),
-  }),
-);
-
-export const flashcardSetsRelations = relations(
-  flashcardSets,
-  ({ one, many }) => ({
-    document: one(documents, {
-      fields: [flashcardSets.documentId],
-      references: [documents.id],
-    }),
-    cards: many(flashcards),
-  }),
 );

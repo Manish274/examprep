@@ -14,6 +14,8 @@ const envSchema = z.object({
 
   API_PORT: z.coerce.number().int().positive().default(3001),
   API_HOST: z.string().default("0.0.0.0"),
+  /** The web app, the one browser origin allowed to call this API. */
+  WEB_ORIGIN: z.string().url().default("http://localhost:3000"),
 
   DATABASE_URL: z.string().url(),
   REDIS_URL: z.string().url(),
@@ -21,11 +23,9 @@ const envSchema = z.object({
   INTERNAL_SERVICE_TOKEN: z.string().min(8),
 
   JWT_ACCESS_SECRET: z.string().min(32),
-  JWT_REFRESH_SECRET: z.string().min(32),
   ACCESS_TOKEN_TTL: z.string().default("15m"),
   REFRESH_TOKEN_TTL_DAYS: z.coerce.number().int().positive().default(30),
 
-  STORAGE_DRIVER: z.enum(["local"]).default("local"),
   STORAGE_LOCAL_PATH: z.string().default("./storage/uploads"),
   MAX_UPLOAD_BYTES: z.coerce.number().int().positive().default(52_428_800),
 });

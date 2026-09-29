@@ -12,9 +12,9 @@
     }
   },
   "scripts": {
+    "prebuild": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run --passWithNoTests",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx src/migrate.ts",
     "db:push": "drizzle-kit push",
@@ -28,7 +28,6 @@
     "@types/node": "^22.10.5",
     "drizzle-kit": "^0.30.1",
     "tsx": "^4.19.2",
-    "typescript": "^5.7.3",
-    "vitest": "^2.1.8"
+    "typescript": "^5.7.3"
   }
 }
