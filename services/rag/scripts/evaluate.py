@@ -66,8 +66,8 @@ def analyse(path: Path, baseline: str) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--user", required=True, help="user id whose corpus to search")
-    parser.add_argument("--gold", required=True, help="path to a JSONL gold set")
+    parser.add_argument("--user", help="user id whose corpus to search")
+    parser.add_argument("--gold", help="path to a JSONL gold set")
     parser.add_argument("--url", default=DEFAULT_URL)
     parser.add_argument("--token", default="dev_internal_token_change_me")
     parser.add_argument("--top-k", type=int, default=10)
@@ -91,6 +91,8 @@ def main() -> int:
 
     if args.analyse:
         return analyse(Path(args.analyse), args.baseline)
+    if not (args.user and args.gold):
+        parser.error("--user and --gold are required unless --analyse is given")
 
     gold_path = Path(args.gold)
     if not gold_path.is_file():

@@ -572,7 +572,9 @@ $("logout").addEventListener("click", () => {
 });
 
 function onSignedIn() {
-  $("who").textContent = S.user?.name || "signed in";
+  // The id is what the RAG service's own endpoints and the evaluation script
+  // take, so it is shown rather than kept in the token.
+  $("who").textContent = S.user ? `${S.user.name} · ${S.user.id}` : "signed in";
   $("logout").hidden = false;
   connectSocket();
   void loadDocuments();

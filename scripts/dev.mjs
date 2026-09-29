@@ -20,6 +20,12 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
+
+// The ports below come from the repo-root .env like everything else, and
+// every child inherits what is loaded here -- which is how the web app, whose
+// own loader only reads apps/web, sees NEXT_PUBLIC_API_URL.
+if (existsSync(join(ROOT, ".env"))) process.loadEnvFile(join(ROOT, ".env"));
+
 const API_PORT = process.env.API_PORT || "3001";
 const RAG_PORT = process.env.RAG_SERVICE_PORT || "8000";
 const WEB_PORT = process.env.WEB_PORT || "3000";
