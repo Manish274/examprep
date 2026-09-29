@@ -26,6 +26,8 @@ export interface IngestResponse {
   cache_hits: number;
   /** Counts from the image-reading pass. */
   vision: Record<string, number>;
+  /** Images a deferred pass left unread; zero once the document is complete. */
+  figures_pending: number;
   page_count: number;
   block_count: number;
   chunk_count: number;
@@ -77,13 +79,14 @@ export function describeFailure(status: number, body: string): string {
 }
 
 /**
- * POSTs to the RAG service and returns its JSON.
+ * Calls the RAG service and returns its JSON: a POST when there is a body, a
+ * GET when there is not.
  *
  * A 4xx is a RagPermanentError -- the request or the document is the problem,
  * and retrying wastes attempts while delaying the failure the student needs
  * to see. Anything else is a plain Error, which the job retries.
  */
-async function post<T>(
+async function call<T>(
   path: string,
   body: unknown,
   options: { correlationId?: string; timeoutMs: number },
@@ -92,7 +95,7 @@ async function post<T>(
 
   try {
     const response = await fetch(new URL(path, RAG_SERVICE_URL), {
-      method: "POST",
+      method: body === undefined ? "GET" : "POST",
       signal: AbortSignal.timeout(options.timeoutMs),
       headers: {
         "content-type": "application/json",
@@ -101,7 +104,7 @@ async function post<T>(
           ? { "x-correlation-id": options.correlationId }
           : {}),
       },
-      body: JSON.stringify(body),
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });
 
     if (!response.ok) {
@@ -123,10 +126,21 @@ async function post<T>(
 }
 
 /**
+ * How long each pass may take. The text pass is seconds for a text document
+ * but reads every page of a scanned one; the figures pass reads up to
+ * VISION_MAX_IMAGES images at a free-tier rate.
+ *
+ * Giving up is cheap either way: the RAG service keeps one run per document,
+ * so a retry after a timeout waits on the run still going instead of starting
+ * the work again.
+ */
+const INGEST_TIMEOUT_MS = { defer: 600_000, read: 1_800_000 } as const;
+
+/**
  * Parses, chunks, embeds and indexes one stored document.
  *
- * Slow on a large deck under free-tier limits, and already inside a background
- * job, so the timeout is generous.
+ * `figures: "defer"` indexes the text and reports the images it left unread;
+ * `figures: "read"` is the full pass that adds them.
  */
 export const ingest = (
   request: {
@@ -135,10 +149,11 @@ export const ingest = (
     filename: string;
     kind: "pdf" | "pptx" | "ppt";
     storageKey: string;
+    figures: "defer" | "read";
   },
   options: { correlationId?: string } = {},
 ): Promise<IngestResponse> =>
-  post(
+  call(
     "/ingest",
     {
       document_id: request.documentId,
@@ -146,16 +161,25 @@ export const ingest = (
       filename: request.filename,
       kind: request.kind,
       storage_key: request.storageKey,
+      figures: request.figures,
     },
-    { timeoutMs: 300_000, ...options },
+    { timeoutMs: INGEST_TIMEOUT_MS[request.figures], ...options },
   );
+
+/** How far the document's running ingest is through its images. */
+export const ingestProgress = (
+  documentId: string,
+): Promise<{ running: boolean; done: number; total: number }> =>
+  call(`/documents/${encodeURIComponent(documentId)}/progress`, undefined, {
+    timeoutMs: 5_000,
+  });
 
 /** Drops a document's vectors from the index. */
 export const deleteVectors = (
   request: { documentId: string; userId: string },
   options: { correlationId?: string } = {},
 ): Promise<{ document_id: string; removed: number }> =>
-  post(
+  call(
     "/documents/delete",
     { document_id: request.documentId, user_id: request.userId },
     { timeoutMs: 30_000, ...options },
@@ -191,7 +215,7 @@ export const generateTest = (
   },
   options: { correlationId?: string } = {},
 ): Promise<{ questions: GeneratedQuestion[]; stats: Record<string, number> }> =>
-  post(
+  call(
     "/generate/test",
     {
       user_id: request.userId,
@@ -207,7 +231,7 @@ export const generateFlashcards = (
   request: { userId: string; documentIds: string[]; cardCount: number },
   options: { correlationId?: string } = {},
 ): Promise<{ cards: GeneratedCard[]; stats: Record<string, number> }> =>
-  post(
+  call(
     "/generate/flashcards",
     {
       user_id: request.userId,

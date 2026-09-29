@@ -223,6 +223,8 @@ export interface DocumentRow {
   status: DocumentStatus;
   pageCount: number | null;
   chunkCount: number | null;
+  /** Images still being read after the document became ready. */
+  figuresPending: number | null;
   errorMessage: string | null;
   createdAt: string;
 }

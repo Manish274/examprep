@@ -166,26 +166,27 @@ export function SuggestionChip({
 /**
  * An uploaded document in the composer.
  *
- * While it is being processed it shows a number when there is one to show,
- * and says "processing" when there is not -- never a fraction that sits at
- * zero while the real work happens elsewhere.
+ * While something is happening to it the tile says what, with a number when
+ * there is one to show -- never a fraction that sits at zero while the real
+ * work happens elsewhere. A ready document can still be busy: its figures are
+ * read after its text is searchable.
  */
 export function AttachmentTile({
   name,
   meta,
   status,
-  progress,
+  activity,
   onRemove,
 }: {
   name: string;
   meta?: string;
   status: "working" | "ready" | "failed";
-  /** 0-100 through the part of processing that can be measured. */
-  progress?: number;
+  /** What is happening to it right now, e.g. "indexing 40%". */
+  activity?: string | null;
   onRemove?: () => void;
 }) {
   const failed = status === "failed";
-  const indexing = status === "working";
+  const indexing = status === "working" || Boolean(activity);
 
   return (
     <div
@@ -233,13 +234,7 @@ export function AttachmentTile({
             color: failed ? "var(--state-wrong)" : "var(--text-faint)",
           }}
         >
-          {failed
-            ? "failed"
-            : indexing
-              ? progress === undefined
-                ? "processing"
-                : `indexing ${progress}%`
-              : (meta ?? "")}
+          {failed ? "failed" : (activity ?? meta ?? "")}
         </span>
       </span>
       {onRemove ? (

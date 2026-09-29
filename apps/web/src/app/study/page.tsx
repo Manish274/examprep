@@ -19,7 +19,11 @@ import { CardsPanel } from "@/components/cards-panel";
 import { StudySetup } from "@/components/study-setup";
 import { useAuth } from "@/lib/auth";
 import { useChat } from "@/hooks/use-chat";
-import { useDocuments, describeDocument } from "@/hooks/use-documents";
+import {
+  describeActivity,
+  describeDocument,
+  useDocuments,
+} from "@/hooks/use-documents";
 import { useStudy } from "@/hooks/use-study";
 
 /**
@@ -141,7 +145,7 @@ export default function StudyPage() {
                     ? document.status
                     : "working"
                 }
-                progress={document.progress}
+                activity={describeActivity(document)}
                 onRemove={() => void docs.remove(document.id)}
               />
             ))

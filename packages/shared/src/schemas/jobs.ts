@@ -36,12 +36,16 @@ export type StudyGenerationJob = z.infer<typeof studyGenerationJobSchema>;
 /**
  * Where a document is in processing.
  *
- * `parsing` is one call to the RAG service, which reads, chunks, embeds and
- * indexes the file in a single request, so it has no fraction to report.
- * `indexing` is the worker storing the chunks it got back, and counts them.
+ * `parsing` is the RAG service reading, chunking, embedding and indexing the
+ * text. It carries a percentage only while it reads page images -- a scanned
+ * document, whose text is its pictures. `indexing` is the worker storing the
+ * chunks it got back, and counts them. `completed` means searchable.
+ *
+ * `figures` comes after `completed`: the document is already in use while
+ * the images in it are read and added, and a second `completed` follows.
  */
 export const jobProgressSchema = z.object({
-  stage: z.enum(["parsing", "indexing", "completed", "failed"]),
+  stage: z.enum(["parsing", "indexing", "completed", "figures", "failed"]),
   /** 0-100 through the current stage, when the stage can measure it. */
   percent: z.number().min(0).max(100).optional(),
   message: z.string().optional(),

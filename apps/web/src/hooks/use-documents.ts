@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { JobProgress } from "@examprep/shared";
 import {
   deleteDocument,
   listDocuments,
@@ -17,14 +18,23 @@ import { useSocket, useSocketEvent } from "@/lib/socket";
  * document just as much as a question does.
  *
  * Progress arrives over the WebSocket rather than by polling. The API returns
- * from the upload as soon as the bytes are stored -- processing a deck takes
- * minutes under free-tier rate limits -- so what is shown here is the worker
- * reporting on itself: a percentage only once there is one to report.
+ * from the upload as soon as the bytes are stored, so what is shown here is
+ * the worker reporting on itself: a percentage only once there is one to
+ * report. A document is ready once its text is indexed; the images in it are
+ * read afterwards, and are shown as on their way while that happens.
  */
 
 export interface DocumentState extends DocumentRow {
-  /** 0-100 through the measurable part of processing, from the worker. */
+  /** Where the worker last said it was. */
+  stage?: JobProgress["stage"];
+  /** 0-100 through the current stage, when the stage can measure it. */
   progress?: number;
+}
+
+/** Whether the worker still has something to say about this document. */
+function inProgress(document: DocumentRow): boolean {
+  if (document.status === "failed") return false;
+  return document.status !== "ready" || (document.figuresPending ?? 0) > 0;
 }
 
 export function useDocuments() {
@@ -38,15 +48,15 @@ export function useDocuments() {
     try {
       const { documents: rows } = await listDocuments();
       setDocuments((previous) => {
-        const progressById = new Map(previous.map((d) => [d.id, d.progress]));
-        return rows.map((row) => ({
-          ...row,
-          // Keep any in-flight percentage: the list endpoint knows the status
-          // but not how far through the worker is.
-          ...(row.status === "ready" || row.status === "failed"
-            ? {}
-            : { progress: progressById.get(row.id) }),
-        }));
+        const before = new Map(previous.map((d) => [d.id, d]));
+        return rows.map((row) => {
+          const known = before.get(row.id);
+          // Keep any in-flight stage: the list endpoint knows the status but
+          // not how far through the worker is.
+          return inProgress(row) && known
+            ? { ...row, stage: known.stage, progress: known.progress }
+            : row;
+        });
       });
       setError(null);
     } catch (err) {
@@ -71,7 +81,7 @@ export function useDocuments() {
       return;
     }
     for (const document of documents) {
-      if (document.status === "ready" || document.status === "failed") continue;
+      if (!inProgress(document)) continue;
       if (watched.current.has(document.id)) continue;
       watched.current.add(document.id);
       send({ type: "subscribe:document", documentId: document.id });
@@ -81,18 +91,22 @@ export function useDocuments() {
   useSocketEvent((event) => {
     if (event.type !== "document:progress") return;
     const { documentId, progress } = event;
+    const settled = progress.stage === "completed" || progress.stage === "failed";
 
     setDocuments((rows) =>
       rows.map((row) =>
         row.id === documentId
-          ? { ...row, progress: progress.percent }
+          ? settled
+            ? { ...row, stage: undefined, progress: undefined }
+            : { ...row, stage: progress.stage, progress: progress.percent }
           : row,
       ),
     );
 
-    // The terminal stage carries no chunk counts, so the row is re-read rather
-    // than patched from the event.
-    if (progress.stage === "completed" || progress.stage === "failed") {
+    // A settled stage carries no chunk counts, so the row is re-read rather
+    // than patched from the event -- and the re-read row says whether its
+    // figures are still to come, which re-subscribes it if they are.
+    if (settled) {
       watched.current.delete(documentId);
       void refresh();
     }
@@ -115,6 +129,7 @@ export function useDocuments() {
             status: "queued",
             pageCount: null,
             chunkCount: null,
+            figuresPending: null,
             errorMessage: null,
             createdAt: new Date().toISOString(),
           },
@@ -160,4 +175,22 @@ export function describeDocument(document: DocumentState): string {
     : null;
   const pages = document.pageCount ? `${document.pageCount} pages` : null;
   return [document.kind.toUpperCase(), size, pages].filter(Boolean).join(" · ");
+}
+
+/**
+ * What the worker is doing with a document, in the tile's words, or null when
+ * it is doing nothing. A number only when the worker has one.
+ */
+export function describeActivity(document: DocumentState): string | null {
+  const percent = document.progress === undefined ? "" : ` ${document.progress}%`;
+  if (document.status === "failed") return null;
+  if (document.status !== "ready") {
+    if (document.stage === "indexing") return `indexing${percent}`;
+    if (document.stage === "parsing" && percent) return `reading pages${percent}`;
+    return "processing";
+  }
+  if ((document.figuresPending ?? 0) > 0) {
+    return `reading figures${document.stage === "figures" ? percent : ""}`;
+  }
+  return null;
 }

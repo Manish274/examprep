@@ -181,6 +181,7 @@ export const documentRoutes = new Hono<AppEnv>()
         status: documents.status,
         pageCount: documents.pageCount,
         chunkCount: documents.chunkCount,
+        figuresPending: documents.figuresPending,
         errorMessage: documents.errorMessage,
         createdAt: documents.createdAt,
         updatedAt: documents.updatedAt,
