@@ -93,7 +93,7 @@ export function Composer({
             background: "transparent",
             border: "none",
             outline: "none",
-            color: "var(--paper-0)",
+            color: "var(--text)",
             fontFamily: "var(--font-sans)",
             fontSize: "var(--text-lg)",
             lineHeight: "var(--text-lg-lh)",
@@ -150,14 +150,14 @@ export function SuggestionChip({
         border: "1px solid var(--border-subtle)",
         borderRadius: "var(--radius-md)",
         cursor: "pointer",
-        color: hover ? "var(--paper-0)" : "var(--text-body)",
+        color: "var(--text)",
         fontFamily: "var(--font-sans)",
         fontSize: "var(--text-md)",
         transition:
           "background var(--dur-fast) var(--ease-standard), color var(--dur-fast) var(--ease-standard)",
       }}
     >
-      {icon ? <Icon as={icon} size={14} style={{ color: "var(--text-muted)" }} /> : null}
+      {icon ? <Icon as={icon} size={14} style={{ color: "var(--text)" }} /> : null}
       {children}
     </button>
   );
@@ -207,10 +207,10 @@ export function AttachmentTile({
         size={15}
         style={{
           color: failed
-            ? "var(--state-wrong)"
+            ? "var(--text-wrong)"
             : indexing
-              ? "var(--accent)"
-              : "var(--text-muted)",
+              ? "var(--text-accent)"
+              : "var(--text)",
         }}
       />
       <span style={{ flex: 1, minWidth: 0 }}>
@@ -218,7 +218,7 @@ export function AttachmentTile({
           style={{
             display: "block",
             fontSize: "var(--text-sm)",
-            color: "var(--paper-0)",
+            color: "var(--text)",
             overflow: "hidden",
             textOverflow: "ellipsis",
             whiteSpace: "nowrap",
@@ -231,7 +231,7 @@ export function AttachmentTile({
             display: "block",
             fontFamily: "var(--font-mono)",
             fontSize: 10,
-            color: failed ? "var(--state-wrong)" : "var(--text-faint)",
+            color: failed ? "var(--text-wrong)" : "var(--text)",
           }}
         >
           {failed ? "failed" : (activity ?? meta ?? "")}
@@ -247,7 +247,7 @@ export function AttachmentTile({
             background: "transparent",
             border: "none",
             cursor: "pointer",
-            color: "var(--text-muted)",
+            color: "var(--text)",
             padding: 4,
           }}
         >

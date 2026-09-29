@@ -50,7 +50,7 @@ export function Display({
           fontFamily: "var(--font-display)",
           fontStyle: "italic",
           fontWeight: 400,
-          color: "var(--text-display)",
+          color: "var(--text)",
         }}
       >
         {serif}
@@ -61,7 +61,7 @@ export function Display({
             display: "block",
             fontFamily: "var(--font-sans)",
             fontWeight: "var(--weight-light)",
-            color: "var(--paper-0)",
+            color: "var(--text)",
             fontSize: "0.82em",
           }}
         >
@@ -76,7 +76,7 @@ export function Display({
  * No logo file was supplied with the design system, so the mark is type: the
  * micro-caps lockup with the middot in accent.
  */
-export function Wordmark({ tone = "primary" }: { tone?: "primary" | "muted" }) {
+export function Wordmark() {
   return (
     <span
       style={{
@@ -84,7 +84,7 @@ export function Wordmark({ tone = "primary" }: { tone?: "primary" | "muted" }) {
         fontWeight: 500,
         letterSpacing: "var(--caps-track)",
         textTransform: "uppercase",
-        color: tone === "primary" ? "var(--paper-0)" : "var(--paper-1)",
+        color: "var(--text)",
         whiteSpace: "nowrap",
       }}
     >

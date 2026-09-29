@@ -9,7 +9,7 @@ const SELECT: CSSProperties = {
   background: "var(--surface-card)",
   border: "1px solid var(--border-subtle)",
   borderRadius: "var(--radius-md)",
-  color: "var(--paper-0)",
+  color: "var(--text)",
   fontFamily: "var(--font-sans)",
   fontSize: "var(--text-sm)",
   outline: "none",
@@ -36,6 +36,7 @@ export function StudySetup({
   const [difficulty, setDifficulty] = useState("mixed");
 
   const chosen = documentId || documents[0]?.id || "";
+  const unavailable = busy || !chosen;
 
   if (documents.length === 0) {
     return (
@@ -43,7 +44,7 @@ export function StudySetup({
         style={{
           margin: "2px 2px 14px",
           fontSize: "var(--text-md)",
-          color: "var(--text-muted)",
+          color: "var(--text)",
         }}
       >
         Add a document with the + first — {mode === "quiz" ? "questions" : "cards"}{" "}
@@ -103,21 +104,22 @@ export function StudySetup({
 
       <button
         type="button"
-        disabled={busy || !chosen}
+        disabled={unavailable}
         onClick={() => onGenerate(chosen, count, difficulty)}
         style={{
           height: 32,
           padding: "0 16px",
           borderRadius: "var(--radius-pill)",
-          border: "1px solid var(--accent)",
-          background: "var(--accent)",
-          color: "#0A0A0B",
+          // Unavailable turns the button neutral rather than fading it, so
+          // "Generating" stays as readable as every other word on the page.
+          border: `1px solid ${unavailable ? "var(--border-default)" : "var(--accent)"}`,
+          background: unavailable ? "var(--surface-raised)" : "var(--accent)",
+          color: unavailable ? "var(--text)" : "var(--text-oncolor)",
           fontFamily: "var(--font-sans)",
           fontSize: "var(--text-sm)",
           fontWeight: 500,
           letterSpacing: "var(--track-wide)",
-          cursor: busy ? "not-allowed" : "pointer",
-          opacity: busy ? 0.38 : 1,
+          cursor: unavailable ? "not-allowed" : "pointer",
           transition: "background var(--dur-fast) var(--ease-standard)",
         }}
       >

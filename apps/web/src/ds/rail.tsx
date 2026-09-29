@@ -13,7 +13,6 @@ export function NavItem({
   children,
   active = false,
   dot = false,
-  muted = false,
   onClick,
   title,
   glow = false,
@@ -22,7 +21,6 @@ export function NavItem({
   children: ReactNode;
   active?: boolean;
   dot?: boolean;
-  muted?: boolean;
   onClick?: () => void;
   title?: string;
   /** A light that follows the pointer, and a ripple on press. For the rail's
@@ -87,17 +85,12 @@ export function NavItem({
           : hover
             ? "rgba(255,255,255,.04)"
             : "transparent",
-        color: active
-          ? "var(--paper-0)"
-          : muted
-            ? "var(--text-muted)"
-            : "var(--text-body)",
+        color: "var(--text)",
         fontFamily: "var(--font-sans)",
         fontSize: "var(--text-md)",
         fontWeight: active ? "var(--weight-medium)" : "var(--weight-regular)",
         textAlign: "left",
-        transition:
-          "background var(--dur-fast) var(--ease-standard), color var(--dur-fast) var(--ease-standard)",
+        transition: "background var(--dur-fast) var(--ease-standard)",
       }}
     >
       {dot ? (
@@ -117,11 +110,7 @@ export function NavItem({
         <Icon
           as={icon}
           size={15}
-          style={{
-            color:
-              active || (glow && hover) ? "var(--paper-0)" : "var(--text-muted)",
-            transition: "color var(--dur-fast) var(--ease-standard)",
-          }}
+          style={{ color: "var(--text)" }}
         />
       ) : null}
       <span
@@ -171,7 +160,7 @@ export function RailSection({
           fontWeight: "var(--weight-medium)",
           letterSpacing: "var(--caps-track)",
           textTransform: "uppercase",
-          color: "var(--text-faint)",
+          color: "var(--text)",
         }}
       >
         {title}

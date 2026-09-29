@@ -135,7 +135,7 @@ export function Rail({
                 margin: 0,
                 padding: "var(--space-3) 10px",
                 fontSize: "var(--text-sm)",
-                color: "var(--text-faint)",
+                color: "var(--text)",
               }}
             >
               Nothing yet.
@@ -145,7 +145,6 @@ export function Rail({
               <NavItem
                 key={session.id}
                 dot
-                muted
                 active={session.id === activeSessionId}
                 onClick={() => onOpenSession(session.id)}
                 title={session.title ?? undefined}
@@ -179,7 +178,7 @@ export function Rail({
                 background: "var(--surface-raised)",
                 border: "1px solid var(--border-subtle)",
                 fontSize: 11,
-                color: "var(--paper-1)",
+                color: "var(--text)",
                 textTransform: "uppercase",
               }}
             >
@@ -190,7 +189,7 @@ export function Rail({
                 style={{
                   display: "block",
                   fontSize: "var(--text-sm)",
-                  color: "var(--paper-1)",
+                  color: "var(--text)",
                   overflow: "hidden",
                   textOverflow: "ellipsis",
                   whiteSpace: "nowrap",
@@ -203,7 +202,7 @@ export function Rail({
                   display: "block",
                   fontFamily: "var(--font-mono)",
                   fontSize: 10,
-                  color: "var(--text-faint)",
+                  color: "var(--text)",
                 }}
               >
                 {documentCount} {documentCount === 1 ? "document" : "documents"}

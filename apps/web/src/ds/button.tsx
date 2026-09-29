@@ -24,7 +24,7 @@ const BTN_BASE: CSSProperties = {
   borderRadius: "var(--radius-pill)",
   cursor: "pointer",
   transition:
-    "background var(--dur-fast) var(--ease-standard), color var(--dur-fast) var(--ease-standard), border-color var(--dur-fast) var(--ease-standard), opacity var(--dur-fast) var(--ease-standard)",
+    "background var(--dur-fast) var(--ease-standard), color var(--dur-fast) var(--ease-standard), border-color var(--dur-fast) var(--ease-standard)",
   whiteSpace: "nowrap",
   textDecoration: "none",
 };
@@ -48,19 +48,28 @@ const BTN_VARIANTS: Record<ButtonVariant, CSSProperties> = {
   },
   secondary: {
     background: "var(--surface-raised)",
-    color: "var(--paper-0)",
+    color: "var(--text)",
     borderColor: "var(--border-default)",
   },
   ghost: {
     background: "transparent",
-    color: "var(--text-body)",
+    color: "var(--text)",
     borderColor: "transparent",
   },
   outline: {
     background: "transparent",
-    color: "var(--paper-0)",
+    color: "var(--text)",
     borderColor: "var(--border-strong)",
   },
+};
+
+/** Unavailable reads as a flat, neutral button with its label at full
+ *  brightness: faded text would be the one place the app's text dims. */
+const BTN_DISABLED: CSSProperties = {
+  background: "var(--surface-raised)",
+  borderColor: "var(--border-default)",
+  color: "var(--text)",
+  cursor: "not-allowed",
 };
 
 // Filled buttons lighten on hover, never darken, and opacity never signals it.
@@ -68,7 +77,7 @@ const BTN_HOVER: Record<ButtonVariant, CSSProperties> = {
   primary: { background: "var(--blue-300)", borderColor: "var(--blue-300)" },
   paper: { background: "#FFFFFF", borderColor: "#FFFFFF" },
   secondary: { background: "var(--surface-hover)" },
-  ghost: { background: "var(--surface-raised)", color: "var(--paper-0)" },
+  ghost: { background: "var(--surface-raised)", color: "var(--text)" },
   outline: { background: "rgba(255,255,255,.06)" },
 };
 
@@ -113,7 +122,7 @@ export function Button({
               letterSpacing: "var(--caps-track)",
             }
           : null),
-        ...(disabled ? { opacity: 0.38, cursor: "not-allowed" } : null),
+        ...(disabled ? BTN_DISABLED : null),
         ...(fullWidth ? { width: "100%" } : null),
         ...style,
       }}
@@ -159,7 +168,7 @@ export function IconButton({
         border: "1px solid transparent",
         cursor: disabled ? "not-allowed" : "pointer",
         background: lifted ? "var(--surface-raised)" : "transparent",
-        color: lifted ? "var(--paper-0)" : "var(--text-muted)",
+        color: "var(--text)",
         opacity: disabled ? 0.38 : 1,
         transition:
           "background var(--dur-fast) var(--ease-standard), color var(--dur-fast) var(--ease-standard)",

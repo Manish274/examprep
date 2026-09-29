@@ -176,11 +176,11 @@ export default function StudyPage() {
             margin: "var(--space-6) 0 0",
             textAlign: "center",
             fontSize: "var(--text-sm)",
-            color: "var(--text-muted)",
+            color: "var(--text)",
           }}
         >
           Nothing uploaded yet. Use the{" "}
-          <span style={{ color: "var(--paper-0)" }}>+</span> to add a PDF or slide
+          <span style={{ color: "var(--text)" }}>+</span> to add a PDF or slide
           deck — answers only ever come from your own material.
         </p>
       ) : null}
@@ -191,7 +191,7 @@ export default function StudyPage() {
             margin: "var(--space-5) 0 0",
             textAlign: "center",
             fontSize: "var(--text-sm)",
-            color: "var(--state-wrong)",
+            color: "var(--text-wrong)",
           }}
         >
           {docs.error}
@@ -281,7 +281,7 @@ export default function StudyPage() {
             style={{
               fontFamily: "var(--font-mono)",
               fontSize: 10,
-              color: chat.connected ? "var(--text-faint)" : "var(--state-review)",
+              color: chat.connected ? "var(--text)" : "var(--text-review)",
             }}
           >
             {chat.connected ? "connected" : "reconnecting"}

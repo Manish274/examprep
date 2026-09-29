@@ -7,11 +7,8 @@
   --ink-4:#2A2A30;   /* hover on raised */
   --ink-5:#35353D;   /* pressed / selected chip */
 
-  /* --- Paper: text and iconography on ink --- */
-  --paper-0:#F4F4F5; /* primary */
-  --paper-1:#B9B9C0; /* secondary */
-  --paper-2:#85858E; /* tertiary, placeholder */
-  --paper-3:#5C5C64; /* disabled, micro-caps */
+  /* --- Paper: the one light tone, for text and for light surfaces --- */
+  --paper-0:#F4F4F5;
 
   /* --- Hairlines --- */
   --line-1:rgba(255,255,255,.07);
@@ -41,13 +38,19 @@
   --surface-hover:var(--ink-4);
   --surface-pressed:var(--ink-5);
 
-  --text-display:var(--paper-0);
-  --text-body:var(--paper-1);
-  --text-muted:var(--paper-2);
-  --text-faint:var(--paper-3);
+  /* Text is set at one brightness everywhere, so every word on every page
+     reads as clearly as every other; hierarchy comes from size and weight,
+     never from dimming. Coloured text keeps its hue but is lightened to sit
+     at nearly the same brightness: the saturated hues above are for dots,
+     borders and fills, and are too dark to read as text on ink. */
+  --text:var(--paper-0);
   --text-oncolor:#0A0A0B;
-  --text-link:var(--blue-300);
-  --text-link-hover:var(--blue-100);
+  --text-accent:#D3E1FD;
+  --text-correct:#BDE0D2;
+  --text-review:#F5DB85;
+  --text-wrong:#FCCBC3;
+  --text-link:var(--text-accent);
+  --text-link-hover:var(--paper-0);
 
   --border-subtle:var(--line-1);
   --border-default:var(--line-2);

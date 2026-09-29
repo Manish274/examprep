@@ -22,6 +22,8 @@ export function QuizOption({
 
   const lit = hover && !disabled;
 
+  // The letter takes the state's hue, lightened to read at text brightness;
+  // the option's words stay at the one text colour in every state.
   const tone = {
     idle: {
       // Hover lifts the row onto the accent rather than merely a rung up the
@@ -29,26 +31,22 @@ export function QuizOption({
       // design system reserves blue for exactly that -- the one live action.
       border: lit ? "var(--blue-tint-32)" : "var(--border-subtle)",
       bg: lit ? "var(--blue-tint-08)" : "transparent",
-      key: lit ? "var(--blue-300)" : "var(--text-muted)",
-      text: lit ? "var(--paper-0)" : "var(--text-body)",
+      key: lit ? "var(--text-accent)" : "var(--text)",
     },
     selected: {
       border: "var(--blue-tint-32)",
       bg: "var(--blue-tint-08)",
-      key: "var(--blue-300)",
-      text: "var(--paper-0)",
+      key: "var(--text-accent)",
     },
     correct: {
       border: "rgba(127,179,163,.4)",
       bg: "rgba(127,179,163,.1)",
-      key: "var(--state-correct)",
-      text: "var(--paper-0)",
+      key: "var(--text-correct)",
     },
     wrong: {
       border: "rgba(229,105,91,.4)",
       bg: "rgba(229,105,91,.1)",
-      key: "var(--state-wrong)",
-      text: "var(--paper-1)",
+      key: "var(--text-wrong)",
     },
   }[state];
 
@@ -69,7 +67,7 @@ export function QuizOption({
         border: `1px solid ${tone.border}`,
         borderRadius: "var(--radius-lg)",
         cursor: disabled ? "default" : "pointer",
-        color: tone.text,
+        color: "var(--text)",
         fontFamily: "var(--font-sans)",
         fontSize: "var(--text-lg)",
         textAlign: "left",
@@ -77,7 +75,7 @@ export function QuizOption({
         // rules both out -- so the row lights up where it stands.
         boxShadow: state === "idle" && lit ? "0 0 0 3px var(--blue-tint-08)" : "none",
         transition:
-          "background var(--dur-fast) var(--ease-standard), border-color var(--dur-fast) var(--ease-standard), box-shadow var(--dur-fast) var(--ease-standard), color var(--dur-fast) var(--ease-standard)",
+          "background var(--dur-fast) var(--ease-standard), border-color var(--dur-fast) var(--ease-standard), box-shadow var(--dur-fast) var(--ease-standard)",
       }}
     >
       <span
@@ -208,7 +206,7 @@ export function ProgressRing({
             position: "absolute",
             fontFamily: "var(--font-mono)",
             fontSize: size > 52 ? 12 : 10,
-            color: "var(--paper-0)",
+            color: "var(--text)",
           }}
         >
           {label}

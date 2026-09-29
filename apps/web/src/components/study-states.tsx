@@ -35,7 +35,7 @@ export function Empty({
           maxWidth: "var(--reading-max)",
           fontSize: "var(--text-md)",
           lineHeight: "var(--text-md-lh)",
-          color: "var(--text-muted)",
+          color: "var(--text)",
           textWrap: "pretty",
         }}
       >
@@ -71,7 +71,7 @@ export function Generating() {
           fontWeight: 500,
           letterSpacing: "var(--caps-track)",
           textTransform: "uppercase",
-          color: "var(--text-faint)",
+          color: "var(--text)",
         }}
       >
         Generating
@@ -96,7 +96,7 @@ export function Failed({
             margin: 0,
             fontSize: "var(--text-md)",
             lineHeight: "var(--text-md-lh)",
-            color: "var(--text-body)",
+            color: "var(--text)",
           }}
         >
           {message ??

@@ -170,7 +170,7 @@ export function CardsPanel({
               margin: 0,
               fontSize: "var(--text-2xl)",
               fontWeight: 400,
-              color: "var(--paper-0)",
+              color: "var(--text)",
             }}
           >
             {state.title}
@@ -179,7 +179,7 @@ export function CardsPanel({
             style={{
               fontFamily: "var(--font-mono)",
               fontSize: 11,
-              color: "var(--text-faint)",
+              color: "var(--text)",
             }}
           >
             {at + 1} / {total}
@@ -191,7 +191,7 @@ export function CardsPanel({
             style={{
               margin: "calc(var(--space-6) * -1) 0 0",
               fontSize: "var(--text-sm)",
-              color: "var(--text-muted)",
+              color: "var(--text)",
             }}
           >
             {total} of the {state.requested} cards you asked for. The rest would have
@@ -328,7 +328,7 @@ export function CardsPanel({
                     textAlign: "center",
                     fontFamily: "var(--font-mono)",
                     fontSize: 13,
-                    color: "var(--text-body)",
+                    color: "var(--text)",
                   }}
                 >
                   {at + 1} / {total}
@@ -346,7 +346,7 @@ export function CardsPanel({
                 style={{
                   margin: 0,
                   fontSize: "var(--text-sm)",
-                  color: "var(--text-faint)",
+                  color: "var(--text)",
                   textAlign: "center",
                 }}
               >
@@ -401,11 +401,11 @@ function Round({
         borderRadius: "var(--radius-pill)",
         border: `1px solid ${lit ? "var(--border-strong)" : "var(--border-subtle)"}`,
         background: lit ? "var(--surface-hover)" : "var(--surface-card)",
-        color: lit ? "var(--paper-0)" : "var(--text-muted)",
+        color: "var(--text)",
         cursor: disabled ? "not-allowed" : "pointer",
         opacity: disabled ? 0.3 : 1,
         transition:
-          "background var(--dur-fast) var(--ease-standard), border-color var(--dur-fast) var(--ease-standard), color var(--dur-fast) var(--ease-standard)",
+          "background var(--dur-fast) var(--ease-standard), border-color var(--dur-fast) var(--ease-standard)",
       }}
     >
       <Icon as={icon} size={Math.round(size * 0.42)} />

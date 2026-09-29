@@ -1,12 +1,12 @@
 *,*::before,*::after{box-sizing:border-box}
-body{margin:0;background:var(--bg-page);color:var(--text-body);font-family:var(--font-sans);font-size:var(--text-md);line-height:var(--text-md-lh);-webkit-font-smoothing:antialiased}
+body{margin:0;background:var(--bg-page);color:var(--text);font-family:var(--font-sans);font-size:var(--text-md);line-height:var(--text-md-lh);-webkit-font-smoothing:antialiased}
 a{color:var(--text-link);text-decoration:none;transition:color var(--dur-fast) var(--ease-standard)}
 a:hover{color:var(--text-link-hover)}
-::selection{background:var(--blue-tint-32);color:var(--paper-0)}
-::placeholder{color:var(--text-muted)}
+::selection{background:var(--blue-tint-32);color:var(--text)}
+::placeholder{color:var(--text)}
 :focus-visible{outline:none;box-shadow:var(--glow-accent)}
-.ep-caps{font-family:var(--font-sans);font-size:var(--caps-size);font-weight:var(--caps-weight);letter-spacing:var(--caps-track);text-transform:uppercase;color:var(--text-faint)}
-.ep-display{font-family:var(--font-display);font-style:italic;font-weight:400;color:var(--text-display);letter-spacing:var(--track-tight)}
+.ep-caps{font-family:var(--font-sans);font-size:var(--caps-size);font-weight:var(--caps-weight);letter-spacing:var(--caps-track);text-transform:uppercase;color:var(--text)}
+.ep-display{font-family:var(--font-display);font-style:italic;font-weight:400;color:var(--text);letter-spacing:var(--track-tight)}
 .ep-scroll::-webkit-scrollbar{width:10px}
 .ep-scroll::-webkit-scrollbar-thumb{background:var(--line-2);border-radius:var(--radius-pill);border:3px solid transparent;background-clip:content-box}
 .ep-scroll::-webkit-scrollbar-track{background:transparent}

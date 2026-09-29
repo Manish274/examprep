@@ -21,13 +21,9 @@ const CARD_STOCK = "url(/flashcard-face.webp) center / cover no-repeat";
 const STOCK_EDGE =
   "radial-gradient(130% 100% at 50% 0%, transparent 42%, rgba(21,18,28,.16))";
 
-const INK = {
-  question: "#15121C",
-  // The answer is the side a student reads closely, so it is set in full
-  // black rather than the near-black the question uses.
-  answer: "#000000",
-  quiet: "rgba(21, 18, 28, .62)",
-} as const;
+/** Everything on the card, labels included, is set in the same full black:
+ *  one strength of ink, as the rest of the app keeps one brightness of text. */
+const INK = "#000000";
 
 const FACE: CSSProperties = {
   position: "absolute",
@@ -52,7 +48,7 @@ const FACE_LABEL: CSSProperties = {
   fontSize: "var(--caps-size)",
   letterSpacing: "var(--caps-track)",
   textTransform: "uppercase",
-  color: INK.quiet,
+  color: INK,
 };
 
 const FACE_FOOT: CSSProperties = {
@@ -64,7 +60,7 @@ const FACE_FOOT: CSSProperties = {
   gap: "var(--space-5)",
   fontFamily: "var(--font-mono)",
   fontSize: 10,
-  color: INK.quiet,
+  color: INK,
 };
 
 /** The wording on either face: set the same, so turning the card changes the
@@ -218,7 +214,7 @@ export function Flashcard({
           <div style={FACE}>
             <div aria-hidden="true" style={FACE_EDGE} />
             <span style={FACE_LABEL}>Question</span>
-            <p className="ep-scroll" style={{ ...FACE_TEXT, color: INK.question }}>
+            <p className="ep-scroll" style={{ ...FACE_TEXT, color: INK }}>
               {question}
             </p>
             <span style={FACE_FOOT}>
@@ -229,7 +225,7 @@ export function Flashcard({
           <div style={{ ...FACE, transform: "rotateY(180deg)" }}>
             <div aria-hidden="true" style={FACE_EDGE} />
             <span style={FACE_LABEL}>Answer</span>
-            <p className="ep-scroll" style={{ ...FACE_TEXT, color: INK.answer }}>
+            <p className="ep-scroll" style={{ ...FACE_TEXT, color: INK }}>
               {answer}
             </p>
             <span style={FACE_FOOT}>

@@ -25,7 +25,7 @@ const FIELD: React.CSSProperties = {
   background: "var(--surface-raised)",
   border: "1px solid var(--border-subtle)",
   borderRadius: "var(--radius-md)",
-  color: "var(--paper-0)",
+  color: "var(--text)",
   fontFamily: "var(--font-sans)",
   fontSize: "var(--text-md)",
   outline: "none",
@@ -36,7 +36,7 @@ const LABEL: React.CSSProperties = {
   fontWeight: 500,
   letterSpacing: "var(--caps-track)",
   textTransform: "uppercase",
-  color: "var(--text-faint)",
+  color: "var(--text)",
 };
 
 /** Mirrors the API's limit, so the field stops where the server would. */
@@ -134,7 +134,7 @@ export default function StartPage() {
               style={{
                 margin: 0,
                 fontSize: "var(--text-sm)",
-                color: "var(--state-wrong)",
+                color: "var(--text-wrong)",
               }}
             >
               {error}
@@ -158,7 +158,7 @@ export default function StartPage() {
             margin: 0,
             fontSize: "var(--text-sm)",
             lineHeight: 1.5,
-            color: "var(--text-muted)",
+            color: "var(--text)",
           }}
         >
           No account needed. Each visit starts fresh, and ending it deletes

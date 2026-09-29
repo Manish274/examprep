@@ -59,7 +59,7 @@ export function ChatThread({
                     gap: 8,
                     fontFamily: "var(--font-mono)",
                     fontSize: 11,
-                    color: "var(--text-faint)",
+                    color: "var(--text)",
                   }}
                 >
                   <span aria-hidden="true" className="ep-pulse" />
@@ -77,7 +77,7 @@ export function ChatThread({
           style={{
             margin: 0,
             fontSize: "var(--text-sm)",
-            color: "var(--state-wrong)",
+            color: "var(--text-wrong)",
           }}
         >
           {error}

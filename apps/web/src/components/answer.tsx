@@ -25,7 +25,7 @@ function inline(text: string, key: string): ReactNode[] {
     const id = `${key}-${index}`;
     if (part.startsWith("**") && part.endsWith("**")) {
       return (
-        <strong key={id} style={{ color: "var(--paper-0)", fontWeight: 500 }}>
+        <strong key={id} style={{ color: "var(--text)", fontWeight: 500 }}>
           {part.slice(2, -2)}
         </strong>
       );
@@ -137,7 +137,7 @@ export function Answer({
             margin: "18px 0 6px",
             fontSize: "var(--text-lg)",
             fontWeight: 500,
-            color: "var(--paper-0)",
+            color: "var(--text)",
           }}
         >
           {withCitations(heading[2]!, sources, key)}
@@ -181,7 +181,7 @@ export function Sources({ sources }: { sources: MessageSource[] }) {
           style={{
             fontFamily: "var(--font-mono)",
             fontSize: 10,
-            color: "var(--text-muted)",
+            color: "var(--text)",
             border: "1px solid var(--line-1)",
             borderRadius: "var(--radius-xs)",
             padding: "5px 8px",

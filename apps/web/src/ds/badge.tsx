@@ -5,27 +5,27 @@ type BadgeTone = "neutral" | "accent" | "correct" | "review" | "wrong";
 const BADGE_TONES: Record<BadgeTone, CSSProperties> = {
   neutral: {
     background: "var(--surface-raised)",
-    color: "var(--text-body)",
+    color: "var(--text)",
     borderColor: "var(--border-default)",
   },
   accent: {
     background: "var(--accent-quiet)",
-    color: "var(--blue-300)",
+    color: "var(--text-accent)",
     borderColor: "var(--blue-tint-32)",
   },
   correct: {
     background: "rgba(127,179,163,.14)",
-    color: "var(--state-correct)",
+    color: "var(--text-correct)",
     borderColor: "rgba(127,179,163,.32)",
   },
   review: {
     background: "rgba(232,197,71,.14)",
-    color: "var(--state-review)",
+    color: "var(--text-review)",
     borderColor: "rgba(232,197,71,.32)",
   },
   wrong: {
     background: "rgba(229,105,91,.14)",
-    color: "var(--state-wrong)",
+    color: "var(--text-wrong)",
     borderColor: "rgba(229,105,91,.32)",
   },
 };

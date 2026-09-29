@@ -33,7 +33,7 @@ export function CitationChip({
         border: "1px solid var(--blue-tint-32)",
         borderRadius: "var(--radius-xs)",
         cursor: "help",
-        color: hover ? "var(--blue-100)" : "var(--blue-300)",
+        color: hover ? "var(--text)" : "var(--text-accent)",
         fontFamily: "var(--font-mono)",
         fontSize: 10,
         lineHeight: 1,
@@ -68,7 +68,7 @@ export function Message({
           background: isUser ? "var(--surface-raised)" : "transparent",
           border: isUser ? "1px solid var(--border-subtle)" : "none",
           borderRadius: isUser ? "var(--radius-xl)" : 0,
-          color: isUser ? "var(--paper-0)" : "var(--text-body)",
+          color: "var(--text)",
           fontSize: isUser ? "var(--text-md)" : "var(--text-lg)",
           lineHeight: isUser ? "var(--text-md-lh)" : 1.68,
         }}

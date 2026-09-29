@@ -25,19 +25,19 @@ const CAPS: React.CSSProperties = {
   fontWeight: 500,
   letterSpacing: "var(--caps-track)",
   textTransform: "uppercase",
-  color: "var(--text-faint)",
+  color: "var(--text)",
 };
 
 const MONO_META: React.CSSProperties = {
   fontFamily: "var(--font-mono)",
   fontSize: 10,
-  color: "var(--text-faint)",
+  color: "var(--text)",
 };
 
 const CITATION_CHIP: React.CSSProperties = {
   fontFamily: "var(--font-mono)",
   fontSize: 10,
-  color: "var(--blue-300)",
+  color: "var(--text-accent)",
   background: "var(--blue-tint-08)",
   border: "1px solid var(--blue-tint-32)",
   borderRadius: "var(--radius-xs)",
@@ -77,7 +77,7 @@ export default function LandingPage() {
     <div
       style={{
         background: "var(--bg-page)",
-        color: "var(--text-body)",
+        color: "var(--text)",
         fontFamily: "var(--font-sans)",
         overflowX: "hidden",
       }}
@@ -106,13 +106,13 @@ export default function LandingPage() {
           className="ep-landing-nav"
           style={{ gap: "var(--space-8)", fontSize: "var(--text-sm)" }}
         >
-          <a href="#modes" style={{ color: "var(--text-body)" }}>
+          <a href="#modes" style={{ color: "var(--text)" }}>
             Two modes
           </a>
-          <a href="#how" style={{ color: "var(--text-body)" }}>
+          <a href="#how" style={{ color: "var(--text)" }}>
             How it works
           </a>
-          <a href="#sources" style={{ color: "var(--text-body)" }}>
+          <a href="#sources" style={{ color: "var(--text)" }}>
             Sources
           </a>
         </nav>
@@ -190,7 +190,7 @@ export default function LandingPage() {
               maxWidth: 560,
               fontSize: "var(--text-lg)",
               lineHeight: "var(--text-lg-lh)",
-              color: "var(--text-body)",
+              color: "var(--text)",
               textWrap: "pretty",
             }}
           >
@@ -275,7 +275,7 @@ export default function LandingPage() {
                 maxWidth: 340,
                 fontSize: "var(--text-md)",
                 lineHeight: "var(--text-md-lh)",
-                color: "var(--text-muted)",
+                color: "var(--text)",
                 textWrap: "pretty",
               }}
             >
@@ -308,7 +308,7 @@ export default function LandingPage() {
                     maxWidth: 420,
                     fontSize: "var(--text-md)",
                     lineHeight: "var(--text-md-lh)",
-                    color: "var(--text-body)",
+                    color: "var(--text)",
                     textWrap: "pretty",
                   }}
                 >
@@ -330,7 +330,7 @@ export default function LandingPage() {
                     style={{
                       fontSize: "var(--text-sm)",
                       lineHeight: "var(--text-sm-lh)",
-                      color: "var(--paper-0)",
+                      color: "var(--text)",
                     }}
                   >
                     Your lecture notes and the textbook disagree on the proton
@@ -356,7 +356,7 @@ export default function LandingPage() {
                     maxWidth: 420,
                     fontSize: "var(--text-md)",
                     lineHeight: "var(--text-md-lh)",
-                    color: "var(--text-body)",
+                    color: "var(--text)",
                     textWrap: "pretty",
                   }}
                 >
@@ -370,24 +370,24 @@ export default function LandingPage() {
                       meta: "3 correct",
                       bg: "rgba(127,179,163,.14)",
                       border: "rgba(127,179,163,.32)",
-                      colour: "var(--state-correct)",
-                      text: "var(--paper-0)",
+                      colour: "var(--text-correct)",
+                      text: "var(--text)",
                     },
                     {
                       label: "Electron transport order",
                       meta: "1 missed",
                       bg: "rgba(232,197,71,.14)",
                       border: "rgba(232,197,71,.32)",
-                      colour: "var(--state-review)",
-                      text: "var(--paper-0)",
+                      colour: "var(--text-review)",
+                      text: "var(--text)",
                     },
                     {
                       label: "Proton gradient maths",
                       meta: "queued",
                       bg: "var(--surface-raised)",
                       border: "var(--line-1)",
-                      colour: "var(--text-muted)",
-                      text: "var(--paper-1)",
+                      colour: "var(--text)",
+                      text: "var(--text)",
                     },
                   ].map((row) => (
                     <div
@@ -450,7 +450,7 @@ export default function LandingPage() {
                 }}
               >
                 <span
-                  style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--accent)" }}
+                  style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-accent)" }}
                 >
                   {step.n}
                 </span>
@@ -460,7 +460,7 @@ export default function LandingPage() {
                     fontSize: "var(--text-2xl)",
                     lineHeight: "var(--text-2xl-lh)",
                     fontWeight: 400,
-                    color: "var(--paper-0)",
+                    color: "var(--text)",
                   }}
                 >
                   {step.title}
@@ -470,7 +470,7 @@ export default function LandingPage() {
                     margin: 0,
                     fontSize: "var(--text-md)",
                     lineHeight: "var(--text-md-lh)",
-                    color: "var(--text-muted)",
+                    color: "var(--text)",
                     textWrap: "pretty",
                   }}
                 >
@@ -514,7 +514,7 @@ export default function LandingPage() {
               maxWidth: 620,
               fontSize: "var(--text-md)",
               lineHeight: "var(--text-md-lh)",
-              color: "var(--text-body)",
+              color: "var(--text)",
               textWrap: "pretty",
             }}
           >
@@ -536,7 +536,7 @@ export default function LandingPage() {
                 style={{
                   fontFamily: "var(--font-mono)",
                   fontSize: 10,
-                  color: "var(--text-muted)",
+                  color: "var(--text)",
                   border: "1px solid var(--line-1)",
                   borderRadius: "var(--radius-xs)",
                   padding: "5px 8px",
@@ -582,7 +582,7 @@ export default function LandingPage() {
                   Upload your notes
                 </Button>
               </Link>
-              <span style={{ fontSize: "var(--text-sm)", color: "var(--text-muted)" }}>
+              <span style={{ fontSize: "var(--text-sm)", color: "var(--text)" }}>
                 No library to set up. The composer is the only entry point.
               </span>
             </div>
@@ -608,7 +608,7 @@ export default function LandingPage() {
             gap: "var(--space-7)",
           }}
         >
-          <Wordmark tone="muted" />
+          <Wordmark />
           <div
             style={{
               display: "flex",
@@ -617,13 +617,13 @@ export default function LandingPage() {
               fontSize: "var(--text-sm)",
             }}
           >
-            <a href="#modes" style={{ color: "var(--text-muted)" }}>
+            <a href="#modes" style={{ color: "var(--text)" }}>
               Two modes
             </a>
-            <a href="#how" style={{ color: "var(--text-muted)" }}>
+            <a href="#how" style={{ color: "var(--text)" }}>
               How it works
             </a>
-            <a href="#sources" style={{ color: "var(--text-muted)" }}>
+            <a href="#sources" style={{ color: "var(--text)" }}>
               Sources
             </a>
           </div>

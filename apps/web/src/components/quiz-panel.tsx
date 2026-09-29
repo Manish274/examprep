@@ -63,7 +63,7 @@ export function QuizPanel({
             margin: 0,
             fontSize: "var(--text-2xl)",
             fontWeight: 400,
-            color: "var(--paper-0)",
+            color: "var(--text)",
           }}
         >
           {state.title}
@@ -72,7 +72,7 @@ export function QuizPanel({
           style={{
             fontFamily: "var(--font-mono)",
             fontSize: 10,
-            color: "var(--text-faint)",
+            color: "var(--text)",
           }}
         >
           {state.questions.length} questions
@@ -93,7 +93,7 @@ export function QuizPanel({
                 style={{
                   fontFamily: "var(--font-mono)",
                   fontSize: 11,
-                  color: "var(--accent)",
+                  color: "var(--text-accent)",
                   paddingTop: 4,
                 }}
               >
@@ -104,7 +104,7 @@ export function QuizPanel({
                   margin: 0,
                   fontSize: "var(--text-xl)",
                   lineHeight: "var(--text-xl-lh)",
-                  color: "var(--paper-0)",
+                  color: "var(--text)",
                 }}
               >
                 {question.prompt}
@@ -169,7 +169,7 @@ export function QuizPanel({
                       margin: 0,
                       fontSize: "var(--text-md)",
                       lineHeight: "var(--text-md-lh)",
-                      color: "var(--text-body)",
+                      color: "var(--text)",
                     }}
                   >
                     {result.feedback}
@@ -197,7 +197,7 @@ export function QuizPanel({
       )}
 
       {state.message ? (
-        <p style={{ margin: 0, fontSize: "var(--text-sm)", color: "var(--state-wrong)" }}>
+        <p style={{ margin: 0, fontSize: "var(--text-sm)", color: "var(--text-wrong)" }}>
           {state.message}
         </p>
       ) : null}
@@ -238,7 +238,7 @@ function ScoreCard({
               fontWeight: 500,
               letterSpacing: "var(--caps-track)",
               textTransform: "uppercase",
-              color: "var(--text-faint)",
+              color: "var(--text)",
             }}
           >
             Your grade
@@ -247,13 +247,13 @@ function ScoreCard({
             style={{
               fontFamily: "var(--font-mono)",
               fontSize: 30,
-              color: "var(--paper-0)",
+              color: "var(--text)",
               lineHeight: 1.1,
             }}
           >
             {score} / {maxScore}
           </span>
-          <span style={{ fontSize: "var(--text-sm)", color: "var(--text-muted)" }}>
+          <span style={{ fontSize: "var(--text-sm)", color: "var(--text)" }}>
             {/* Literal, not congratulatory: the product states what it found. */}
             {score === maxScore
               ? "Every question correct."
