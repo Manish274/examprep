@@ -20,7 +20,8 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the decision record.
   visits.
 - **Upload, then study.** The `+` in the composer takes a PDF or slide deck.
   It is parsed, chunked, embedded and indexed in the background, with progress
-  shown on the file.
+  shown on the file. The text is usable within seconds; the pictures in it are
+  read afterwards and added while the student is already studying.
 - **Three modes**, switched in the sidebar: **Chat** answers questions from the
   uploads with citations; **Quiz** writes multiple-choice questions from a
   chosen document and grades them; **Flashcards** makes a deck to flip through.
@@ -205,7 +206,7 @@ no-op stand-in; set the provider and its key to switch it on.
 | Generation | `gemini-3.8-flash`, `gemini-3.5-flash-lite` for rewrites | mock |
 | Reranking | Jina `jina-reranker-v2` | Gemini listwise, no-op |
 | Sparse | BM25 | — |
-| Vision | `gemini-3.5-flash-lite` | mock, no-op |
+| Vision | `gemini-3.1-flash-lite`, a model of its own so it has its own daily budget | mock, no-op |
 
 BM25 needs no model at all: term frequency, IDF and stemming, running locally.
 
@@ -298,16 +299,30 @@ from a textbook, a formula pasted as an image, a scanned page. None of it
 survives text extraction.
 
 `VISION_PROVIDER=gemini` sends those images to a multimodal model, which
-transcribes text and tables verbatim and describes real diagrams. Two filters
-keep the quota honest, because every image costs a call: images below
-`VISION_MIN_PIXELS` are treated as decoration, and identical images are read
-once.
+transcribes text and tables verbatim and describes real diagrams.
+
+Reading images is the slow part of ingestion and the only part that can run out
+of quota, so a document is ingested in two passes. The first indexes the text
+and the document is ready; the second reads the images and swaps in the chunks
+they change, while the student is already studying. A scanned PDF has no text
+to show in the meantime, so its pages are read in the first pass.
+
+The free tier allows a few dozen vision requests a day, so every image has to
+earn its call:
+
+- images below `VISION_MIN_PIXELS` are decoration, and identical images are
+  read once;
+- every reading is cached by image hash (`vision_cache`), so a retried upload
+  or a second copy of the same slides costs nothing;
+- images go `VISION_BATCH_SIZE` to a request, each answer matched back to its
+  image by number, and at most `VISION_MAX_IMAGES` new ones per document;
+- the first sign that the day's quota is spent stops the rest. The text stays
+  indexed, and the images left over are read on the next attempt.
 
 **Image-derived text is marked as generated, not extracted.** Chunks carry
 `source="vision"`, and the citation says it was read from an image. A
 mis-transcribed formula must never be indistinguishable from the document's own
-words. Scanned PDFs go through the same path: a page with no text layer is
-rendered and read as an image rather than rejected.
+words.
 
 ---
 
@@ -442,8 +457,10 @@ was rate limited.
 
 - Ingestion is bound by free-tier rate limits, so large documents process
   slowly rather than failing. Embeddings are cached on
-  `(model_id, sha256(chunk_text))`, making re-ingests and evaluation re-runs
-  free.
+  `(model_id, sha256(chunk_text))` and image readings on the image's hash,
+  making re-ingests and evaluation re-runs free. The RAG service runs one
+  ingest per document at a time, so a worker retry after a timeout waits on
+  the run already going rather than starting the work again.
 - Gemini's free tier allows about 20 generation requests a day per model;
   switching `LLM_MODEL` buys another 20. Embeddings have a separate, larger
   budget.
