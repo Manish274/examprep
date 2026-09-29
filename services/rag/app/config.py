@@ -151,11 +151,6 @@ class Settings(BaseSettings):
     def has_gemini_key(self) -> bool:
         return bool(self.GEMINI_API_KEY)
 
-    @property
-    def async_database_url(self) -> str:
-        """SQLAlchemy needs the asyncpg driver named explicitly."""
-        return self.DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
-
 
 @lru_cache
 def get_settings() -> Settings:

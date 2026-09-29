@@ -3,7 +3,6 @@ fastapi==0.115.6
 uvicorn[standard]==0.34.0
 pydantic==2.10.4
 pydantic-settings==2.7.1
-python-multipart==0.0.20
 httpx==0.28.1
 
 # ── document parsing ────────────────────────────────────────
@@ -17,14 +16,5 @@ qdrant-client==1.12.2
 tiktoken==0.8.0
 snowballstemmer==2.2.0
 
-# ── persistence ─────────────────────────────────────────────
+# ── persistence: the embedding cache and the trace sink ─────
 asyncpg==0.30.0
-sqlalchemy[asyncio]==2.0.36
-
-# ── providers ───────────────────────────────────────────────
-google-genai==0.3.0
-tenacity==9.0.0
-
-# ── utilities ───────────────────────────────────────────────
-structlog==24.4.0
-numpy==2.2.1

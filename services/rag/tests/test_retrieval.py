@@ -239,8 +239,10 @@ class TestHybridRetrieval:
         ids = [r.chunk.id for r in results]
         assert len(ids) == len(set(ids))
 
-    async def test_hybrid_rerank_falls_back_to_hybrid_for_now(self, service) -> None:
-        # The reranker lands in Milestone 3; until then this must still return
+    async def test_hybrid_rerank_without_a_reranker_is_plain_hybrid(
+        self, service
+    ) -> None:
+        # With no reranker configured, the reranked strategy returns the fused
         # candidates rather than failing.
         retrieval, _, _ = service
         results = await retrieval.search(
