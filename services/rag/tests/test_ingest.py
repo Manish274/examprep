@@ -423,6 +423,149 @@ class TestVectorDeletion:
         assert response.json()["removed"] == 0
 
 
+def _figures_pdf(path: Path) -> None:
+    """Two pages of prose with a picture on the second, big enough to read."""
+    import fitz
+
+    picture = fitz.Pixmap(fitz.csRGB, fitz.IRect(0, 0, 400, 300), 0)
+    picture.clear_with(180)
+    with fitz.open() as pdf:
+        for number, body in enumerate(
+            (
+                "B-trees keep keys sorted and balanced. Every node holds between "
+                "t-1 and 2t-1 keys, so the height stays logarithmic in the number "
+                "of keys stored. Searching descends from the root one node at a "
+                "time, comparing against the keys held in each node.",
+                "Inserting into a full node splits it around the median key, and "
+                "the median moves up into the parent. The diagram below shows a "
+                "node of a B-tree of minimum degree three before and after a split.",
+            ),
+            start=1,
+        ):
+            page = pdf.new_page()
+            page.insert_textbox(fitz.Rect(72, 72, 520, 300), body, fontsize=11)
+            if number == 2:
+                page.insert_image(fitz.Rect(72, 320, 472, 620), pixmap=picture)
+        pdf.save(str(path))
+
+
+@pytest.fixture
+async def vision_client(uploads: Path):
+    """A service reading images with the stand-in model."""
+    _figures_pdf(uploads / "user-1" / "figures.pdf")
+    settings = Settings(
+        INTERNAL_SERVICE_TOKEN=TOKEN,
+        STORAGE_LOCAL_PATH=uploads,
+        EMBEDDING_PROVIDER="mock",
+        EMBEDDING_DIMENSIONS=DIMENSIONS,
+        VISION_PROVIDER="mock",
+        QDRANT_COLLECTION=f"test_ingest_{uuid.uuid4().hex[:12]}",
+    )
+
+    container = build_test_container(settings)
+    set_container(container)
+    await container.startup()
+
+    app = create_app()
+    app.dependency_overrides[get_settings] = lambda: settings
+    try:
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app),
+            base_url="http://test",
+            headers={"x-internal-token": TOKEN},
+        ) as client:
+            yield client
+    finally:
+        await container.qdrant.delete_collection(settings.QDRANT_COLLECTION)
+        await container.shutdown()
+        set_container(None)
+
+
+def _figures_body(figures: str, **overrides: object) -> dict[str, object]:
+    return _pdf_body(
+        filename="figures.pdf",
+        storage_key="user-1/figures.pdf",
+        figures=figures,
+        **overrides,
+    )
+
+
+def _sources(body: dict[str, object]) -> set[str]:
+    return {c["source"] for c in body["chunks"]}  # type: ignore[attr-defined]
+
+
+class TestFigures:
+    """The text is indexed first; the pictures follow in a second pass."""
+
+    async def test_a_deferred_pass_indexes_the_text_and_counts_the_pictures(
+        self, vision_client: httpx.AsyncClient
+    ) -> None:
+        from app.container import get_container
+
+        body = (await vision_client.post("/ingest", json=_figures_body("defer"))).json()
+
+        assert body["figures_pending"] == 1
+        assert _sources(body) == {"text"}
+        assert get_container().vision.calls == 0  # type: ignore[union-attr]
+        assert await get_container().store.count(user_id=USER) == body["chunk_count"]
+
+    async def test_the_full_pass_adds_them_and_leaves_no_stale_chunks(
+        self, vision_client: httpx.AsyncClient
+    ) -> None:
+        from app.container import get_container
+
+        await vision_client.post("/ingest", json=_figures_body("defer"))
+        body = (await vision_client.post("/ingest", json=_figures_body("read"))).json()
+
+        assert body["figures_pending"] == 0
+        combined = " ".join(c["text"] for c in body["chunks"])
+        assert "A diagram showing a worked example." in combined
+        # Replaced in place: the chunks the figure changed are gone.
+        assert await get_container().store.count(user_id=USER) == body["chunk_count"]
+
+    async def test_a_picture_read_once_is_never_read_again(
+        self, vision_client: httpx.AsyncClient
+    ) -> None:
+        # A retried upload, or the same slides uploaded by someone else.
+        from app.container import get_container
+
+        await vision_client.post("/ingest", json=_figures_body("read"))
+        again = (
+            await vision_client.post(
+                "/ingest", json=_figures_body("defer", document_id="doc-copy")
+            )
+        ).json()
+
+        assert again["figures_pending"] == 0
+        assert again["vision"]["cached"] == 1
+        assert get_container().vision.calls == 1  # type: ignore[union-attr]
+
+    async def test_a_scanned_document_is_read_straight_away(
+        self, vision_client: httpx.AsyncClient
+    ) -> None:
+        # With no text there is nothing to search in the meantime, so a
+        # deferred pass reads the pages rather than leaving the document empty.
+        body = (
+            await vision_client.post(
+                "/ingest",
+                json=_pdf_body(
+                    filename="empty.pdf",
+                    storage_key="user-1/empty.pdf",
+                    figures="defer",
+                ),
+            )
+        ).json()
+
+        assert body["figures_pending"] == 0
+        assert _sources(body) == {"vision"}
+
+    async def test_progress_is_idle_when_nothing_runs(
+        self, vision_client: httpx.AsyncClient
+    ) -> None:
+        response = await vision_client.get("/documents/doc-1/progress")
+        assert response.json() == {"running": False, "done": 0, "total": 0}
+
+
 class TestDeterministicChunkIds:
     async def test_reingesting_produces_identical_chunk_ids(
         self, client: httpx.AsyncClient

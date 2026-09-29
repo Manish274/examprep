@@ -4,12 +4,16 @@ Called by the Node worker, never by a browser. The worker supplies a storage
 key; this service reads the file, parses it, chunks it, and returns the chunks
 with their metadata intact. Persisting them is the worker's job -- Postgres
 belongs to the Node side.
+
+A document is usually ingested twice: once with `figures="defer"`, which makes
+its text searchable in seconds, and then, if that pass left images unread, with
+`figures="read"` to add them.
 """
 
 from __future__ import annotations
 
 import logging
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
@@ -17,6 +21,8 @@ from pydantic import BaseModel, Field
 from app.api.deps import CorrelationId, InternalAuth, SettingsDep
 from app.container import get_container
 from app.core.models import Chunk, DocumentKind
+from app.embedding.rate_limit import QuotaExhaustedError
+from app.ingestion import inflight
 from app.ingestion.pipeline import (
     EmptyDocumentError,
     UnsupportedDocumentError,
@@ -42,6 +48,10 @@ class IngestRequest(BaseModel):
     # Named rather than inlined so an evaluation run can compare strategies
     # without a deploy.
     chunker: str = Field(default="structural")
+    # "defer" indexes the text now and leaves unread images for a later "read"
+    # pass, reporting how many in `figures_pending`. A document with no text
+    # at all -- a scanned one -- is read in full either way.
+    figures: Literal["defer", "read"] = "read"
 
 
 class ChunkResponse(BaseModel):
@@ -98,6 +108,8 @@ class IngestResponse(BaseModel):
     indexed: int
     cache_hits: int
     vision: dict[str, int]
+    # Images a "defer" pass left unread. Zero means the document is complete.
+    figures_pending: int
     # Chunks whose text was byte-identical to an earlier one and were dropped.
     # A high count on a deck usually means repeated title or build-up slides.
     duplicates_dropped: int
@@ -130,19 +142,37 @@ async def ingest(
     container = get_container()
     identify(user_id=request.user_id)
     try:
-        result = await ingest_document(
-            path,
-            document_id=request.document_id,
-            filename=request.filename,
-            kind=request.kind,
-            settings=settings,
-            chunker_name=request.chunker,
-            user_id=request.user_id,
-            embedder=container.embedder,
-            sparse_encoder=container.sparse_encoder,
-            store=container.store,
-            vision=container.vision,
+        result = await inflight.run_once(
+            request.document_id,
+            f"{request.figures}:{request.chunker}:{request.user_id}:{request.storage_key}",
+            lambda on_progress: ingest_document(
+                path,
+                document_id=request.document_id,
+                filename=request.filename,
+                kind=request.kind,
+                settings=settings,
+                chunker_name=request.chunker,
+                user_id=request.user_id,
+                embedder=container.embedder,
+                sparse_encoder=container.sparse_encoder,
+                store=container.store,
+                vision=container.vision,
+                vision_cache=container.vision_cache,
+                read_figures=request.figures == "read",
+                on_progress=on_progress,
+            ),
         )
+    except QuotaExhaustedError as exc:
+        # A 4xx, so the worker fails the document at once rather than
+        # retrying into the same wall; the message is what the student sees.
+        logger.warning("ingest of %s stopped: %s", request.document_id, exc)
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=(
+                "Today's free quota for indexing documents is used up. "
+                "Try uploading this again tomorrow."
+            ),
+        ) from exc
     except UnsupportedDocumentError as exc:
         raise HTTPException(
             status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, detail=str(exc)
@@ -174,6 +204,7 @@ async def ingest(
         indexed=result.indexed,
         cache_hits=result.cache_hits,
         vision=result.vision,
+        figures_pending=result.figures_pending,
         duplicates_dropped=len(result.duplicates),
         timings=result.timings,
         metadata=result.document.metadata,
@@ -197,9 +228,12 @@ async def delete_document(request: DeleteRequest) -> dict[str, Any]:
     that deleting means deleted.
 
     Scoped by user id so a document id alone cannot remove another user's
-    vectors.
+    vectors. Any ingest still running for the document is stopped first;
+    otherwise it would write the vectors straight back.
     """
     container = get_container()
+    if await inflight.cancel(request.document_id):
+        logger.info("stopped the running ingest of %s", request.document_id)
     before = await container.store.count(user_id=request.user_id)
     await container.store.delete_document(request.document_id, user_id=request.user_id)
     after = await container.store.count(user_id=request.user_id)
@@ -208,6 +242,20 @@ async def delete_document(request: DeleteRequest) -> dict[str, Any]:
         "removed %s vectors for document %s", before - after, request.document_id
     )
     return {"document_id": request.document_id, "removed": before - after}
+
+
+@router.get("/documents/{document_id}/progress")
+async def ingest_progress(document_id: str) -> dict[str, Any]:
+    """How far a running ingest is through its images.
+
+    Polled by the worker while it waits on /ingest, because reading images is
+    the one stage long enough to be worth a progress bar -- and a single
+    request has no other way to report part way through.
+    """
+    run = inflight.progress(document_id)
+    if run is None:
+        return {"running": False, "done": 0, "total": 0}
+    return {"running": True, "done": run.done, "total": run.total}
 
 
 class PreviewRequest(BaseModel):
@@ -242,6 +290,7 @@ async def preview(
         settings=settings,
         chunker_name=request.chunker,
         vision=get_container().vision,
+        vision_cache=get_container().vision_cache,
     )
 
     return {

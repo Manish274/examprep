@@ -20,10 +20,10 @@ from collections.abc import Sequence
 
 import httpx
 
+from app.core.gemini import rate_limit_error
 from app.core.models import EmbeddingVector
 from app.embedding.rate_limit import (
     RateLimiter,
-    RateLimitError,
     TransientError,
     with_retries,
 )
@@ -76,11 +76,7 @@ class GeminiEmbeddingProvider:
 
         detail = response.text[:300]
         if response.status_code == 429:
-            hint = response.headers.get("retry-after")
-            raise RateLimitError(
-                f"embedding rate limited: {detail}",
-                retry_after=float(hint) if hint and hint.isdigit() else None,
-            )
+            raise rate_limit_error(response, "embedding")
         if response.status_code >= 500:
             raise TransientError(f"embedding upstream {response.status_code}: {detail}")
         # 4xx other than 429 will not improve on retry.

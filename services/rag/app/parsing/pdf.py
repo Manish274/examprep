@@ -48,6 +48,9 @@ _SCANNED_PAGE_CHARS = 60
 # without producing an image too large to send.
 _RENDER_DPI = 150
 
+# High enough that small print survives: legibility is accuracy here.
+_JPEG_QUALITY = 88
+
 
 def _extract_page_images(
     page: fitz.Page, doc: fitz.Document, page_number: int, order: int
@@ -95,17 +98,26 @@ def _render_page(
     Used for scanned pages, where the content is not embedded images but the
     page itself. Without this a scanned PDF is simply unusable, which is the
     single most common complaint about document RAG.
+
+    Encoded as whichever of PNG and JPEG is smaller. A photographed or scanned
+    page is a photograph, and as PNG it runs to megabytes -- several of them
+    to a vision request add up to the size limit. A page of flat vector
+    drawing is the reverse, and PNG wins.
     """
     try:
         pixmap = page.get_pixmap(dpi=_RENDER_DPI)
-        blob = pixmap.tobytes("png")
+        png = pixmap.tobytes("png")
+        jpeg = pixmap.tobytes("jpg", jpg_quality=_JPEG_QUALITY)
     except Exception as exc:
         logger.debug("could not render page %s: %s", page_number, exc)
         return None
 
+    blob, mime_type = (
+        (jpeg, "image/jpeg") if len(jpeg) < len(png) else (png, "image/png")
+    )
     return ExtractedImage(
         data=blob,
-        mime_type="image/png",
+        mime_type=mime_type,
         order=order,
         page_number=page_number,
         width=pixmap.width,

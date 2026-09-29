@@ -5,6 +5,7 @@ import {
   jsonb,
   pgEnum,
   pgTable,
+  primaryKey,
   real,
   text,
   timestamp,
@@ -167,6 +168,12 @@ export const documents = pgTable(
     errorMessage: text("error_message"),
     /** Parser used, embedding model, dimensions — needed to detect staleness. */
     processingMeta: jsonb("processing_meta").$type<Record<string, unknown>>(),
+    /**
+     * Images still being read after the document became ready. The text is
+     * searchable as soon as it is indexed; the figures follow, and this is
+     * what tells the web app to show that they are on their way.
+     */
+    figuresPending: integer("figures_pending"),
     processedAt: timestamp("processed_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
@@ -253,6 +260,25 @@ export const embeddingCache = pgTable(
       t.contentHash,
     ),
   ],
+);
+
+/**
+ * What a vision model read in an image, by (model and prompt version, image
+ * hash). A free-tier vision model allows a few dozen calls a day, so a retried
+ * upload or a second copy of the same slides must not pay for them again.
+ */
+export const visionCache = pgTable(
+  "vision_cache",
+  {
+    modelKey: varchar("model_key", { length: 160 }).notNull(),
+    contentHash: varchar("content_hash", { length: 64 }).notNull(),
+    /** Null when the model judged the image to carry no study content. */
+    reading: text("reading"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.modelKey, t.contentHash] })],
 );
 
 // ─────────────────────────────────────────────────────────────

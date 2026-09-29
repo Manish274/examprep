@@ -49,10 +49,10 @@ from app.retrieval.retrievers import (
     RetrievalService,
     SparseRetriever,
 )
+from app.vision.cache import InMemoryVisionCache, PostgresVisionCache, VisionCache
 from app.vision.providers import (
     GeminiVisionProvider,
     MockVisionProvider,
-    NoOpVisionProvider,
     VisionProvider,
 )
 
@@ -132,17 +132,17 @@ def build_reranker(settings: Settings) -> Reranker:
     )
 
 
-def build_vision(settings: Settings) -> VisionProvider:
-    """Selects the vision provider.
+def build_vision(settings: Settings) -> VisionProvider | None:
+    """Selects the vision provider, or None when images are not read at all.
 
-    Defaults to noop, which is exactly the behaviour before images were read at
-    all -- so enabling it is a deliberate choice rather than a surprise on the
+    Defaults to noop, which is exactly the behaviour before images were read
+    -- so enabling it is a deliberate choice rather than a surprise on the
     quota bill.
     """
     provider = settings.VISION_PROVIDER.lower()
 
     if provider == "noop":
-        return NoOpVisionProvider()
+        return None
     if provider == "mock":
         return MockVisionProvider()
     if provider == "gemini":
@@ -161,6 +161,14 @@ def build_vision(settings: Settings) -> VisionProvider:
         f"Unknown VISION_PROVIDER '{settings.VISION_PROVIDER}'. "
         "Available: noop, mock, gemini"
     )
+
+
+def build_vision_cache(settings: Settings) -> VisionCache:
+    """The shared cache for a real model; an in-process one for the stand-in,
+    whose readings mean nothing outside the process that made them."""
+    if settings.VISION_PROVIDER.lower() == "gemini":
+        return PostgresVisionCache(settings.DATABASE_URL)
+    return InMemoryVisionCache()
 
 
 def build_llm(settings: Settings, *, utility: bool = False) -> LLMProvider:
@@ -277,6 +285,7 @@ class Container:
         *,
         tracer: Tracer | None = None,
         embedding_cache: EmbeddingCache | None = None,
+        vision_cache: VisionCache | None = None,
     ) -> None:
         self.settings = settings
         self.tracer = tracer or build_tracer(settings)
@@ -284,6 +293,7 @@ class Container:
         self.sparse_encoder = Bm25Encoder()
         self.reranker = build_reranker(settings)
         self.vision = build_vision(settings)
+        self.vision_cache = vision_cache or build_vision_cache(settings)
         self.llm = build_llm(settings)
         self.utility_llm = build_llm(settings, utility=True)
         self.context_builder = ContextBuilder(
@@ -345,6 +355,7 @@ class Container:
         await self.tracer.close()
         if isinstance(self.embedder, CachedEmbeddingProvider):
             await self.embedder.close()
+        await self.vision_cache.close()
         await self.qdrant.close()
 
 
@@ -365,12 +376,13 @@ def set_container(container: Container | None) -> None:
 def build_test_container(settings: Settings) -> Container:
     """A container that needs neither Postgres nor a trace table.
 
-    The embedding cache and the trace sink are held in memory: tests must not
-    depend on a database being reachable, must not fill the shared cache with
-    vectors from throwaway fixtures, and read what was traced back from memory.
+    The caches and the trace sink are held in memory: tests must not depend on
+    a database being reachable, must not fill the shared caches with readings
+    of throwaway fixtures, and read what was traced back from memory.
     """
     return Container(
         settings,
         tracer=InMemoryTracer(),
         embedding_cache=InMemoryEmbeddingCache(),
+        vision_cache=InMemoryVisionCache(),
     )

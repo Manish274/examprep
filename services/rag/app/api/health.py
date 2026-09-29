@@ -99,6 +99,8 @@ async def config_summary(settings: SettingsDep) -> dict[str, Any]:
             "model": settings.VISION_MODEL,
             "min_pixels": settings.VISION_MIN_PIXELS,
             "max_images": settings.VISION_MAX_IMAGES,
+            "batch_size": settings.VISION_BATCH_SIZE,
+            "concurrency": settings.VISION_CONCURRENCY,
         },
         "chat": {
             "history_turns": settings.CHAT_HISTORY_TURNS,

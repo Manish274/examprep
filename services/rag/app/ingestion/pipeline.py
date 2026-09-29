@@ -1,9 +1,16 @@
 """Ingestion pipeline: file in, indexed chunks out.
 
-    parse -> chunk -> embed (dense) -> encode (sparse) -> index
+    parse -> read images -> chunk -> embed (dense) -> encode (sparse) -> index
 
 Selects a parser by document kind and a chunker by name, so an evaluation can
 compare chunking strategies by changing a string rather than this code.
+
+Reading images is by far the slowest stage and the only one that can run out
+of quota, so it can be deferred: a pass with `read_figures=False` indexes the
+text (and any figures already in the vision cache) in seconds, and reports how
+many images are still unread. A second, full pass later adds them. Because
+chunk ids are derived from chunk text and embeddings are cached, that second
+pass re-embeds only the chunks the figures actually changed.
 """
 
 from __future__ import annotations
@@ -17,11 +24,12 @@ from app.chunking.structural import StructuralChunker
 from app.config import Settings
 from app.core.interfaces import EmbeddingProvider, SparseEncoder
 from app.core.models import Chunk, DocumentKind, ParsedDocument
-from app.ingestion.vision_enrichment import enrich_with_vision
+from app.ingestion.vision_enrichment import ProgressCallback, enrich_with_vision
 from app.observability.trace import span
 from app.parsing.pdf import PyMuPDFParser
 from app.parsing.pptx import PythonPptxParser
 from app.retrieval.qdrant_store import QdrantStore
+from app.vision.cache import VisionCache
 from app.vision.providers import VisionProvider
 
 logger = logging.getLogger(__name__)
@@ -122,6 +130,11 @@ class IngestionResult:
         self.vision = vision or {}
         self.duplicates = duplicates or []
 
+    @property
+    def figures_pending(self) -> int:
+        """Images left unread by a pass that deferred them."""
+        return self.vision.get("pending", 0)
+
 
 async def parse_and_chunk(
     path: Path,
@@ -132,8 +145,11 @@ async def parse_and_chunk(
     settings: Settings,
     chunker_name: str = "structural",
     vision: VisionProvider | None = None,
+    vision_cache: VisionCache | None = None,
+    read_figures: bool = True,
+    on_progress: ProgressCallback | None = None,
 ) -> IngestionResult:
-    """Parse, optionally read the images, then chunk."""
+    """Parse, read the images (or only the cached ones), then chunk."""
     if not path.is_file():
         raise FileNotFoundError(f"Document not found at {path}")
 
@@ -151,23 +167,39 @@ async def parse_and_chunk(
     parse_ms = int((time.perf_counter() - started) * 1000)
 
     # Images are read before the empty-document check, because a scanned PDF
-    # has no text at all and the vision pass is exactly what rescues it.
+    # has no text at all and the vision pass is exactly what rescues it -- and
+    # for the same reason a document with no text is never deferred: there
+    # would be nothing to search in the meantime.
     vision_stats: dict[str, int] = {}
     vision_ms = 0
-    if vision is not None and document.images:
+    if vision is not None and vision_cache is not None and document.images:
+        read = read_figures or not document.blocks
         started = time.perf_counter()
-        async with span("vision", candidates=len(document.images)) as observed:
+        async with span(
+            "vision", candidates=len(document.images), read=read
+        ) as observed:
             result = await enrich_with_vision(
                 document,
                 vision,
+                vision_cache,
                 min_pixels=settings.VISION_MIN_PIXELS,
                 max_images=settings.VISION_MAX_IMAGES,
+                batch_size=settings.VISION_BATCH_SIZE,
+                concurrency=settings.VISION_CONCURRENCY,
+                read=read,
+                on_progress=on_progress,
             )
             vision_stats = result.as_dict()
             observed.output(**vision_stats)
         vision_ms = int((time.perf_counter() - started) * 1000)
 
     if not document.blocks:
+        if vision_stats.get("skipped_quota") or vision_stats.get("failed"):
+            raise EmptyDocumentError(
+                "This document's pages are images, and they could not be read "
+                "right now -- the free daily quota for reading images may be "
+                "used up. Try uploading it again later."
+            )
         raise EmptyDocumentError(
             "No extractable text found. If this is a scanned document, enable "
             "the vision provider so its pages can be read as images."
@@ -270,13 +302,20 @@ async def embed_and_index(
     started = time.perf_counter()
     async with span("index", chunks=len(chunks)) as observed:
         # Replace rather than append: a re-ingest must not leave the previous
-        # generation of chunks in the index alongside the new one.
-        await store.delete_document(result.document.document_id, user_id=user_id)
+        # generation of chunks in the index alongside the new one. Written
+        # first and pruned after, because a document is searchable while its
+        # figures are added -- deleting first would leave it empty for the
+        # length of the upsert.
         indexed = await store.upsert_chunks(
             chunks,
             [v.values for v in vectors],
             sparse,
             user_id=user_id,
+        )
+        await store.delete_document(
+            result.document.document_id,
+            user_id=user_id,
+            keep=[chunk.id for chunk in chunks],
         )
         observed.output(indexed=indexed)
     index_ms = int((time.perf_counter() - started) * 1000)
@@ -311,6 +350,9 @@ async def ingest_document(
     sparse_encoder: SparseEncoder | None = None,
     store: QdrantStore | None = None,
     vision: VisionProvider | None = None,
+    vision_cache: VisionCache | None = None,
+    read_figures: bool = True,
+    on_progress: ProgressCallback | None = None,
 ) -> IngestionResult:
     """Full pipeline. Stops after chunking when no index target is supplied,
     which is what the preview endpoint and the chunking tests want."""
@@ -322,6 +364,9 @@ async def ingest_document(
         settings=settings,
         chunker_name=chunker_name,
         vision=vision,
+        vision_cache=vision_cache,
+        read_figures=read_figures,
+        on_progress=on_progress,
     )
 
     if user_id and embedder and sparse_encoder and store:

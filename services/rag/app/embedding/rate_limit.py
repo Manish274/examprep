@@ -76,6 +76,14 @@ class TransientError(Exception):
     """A 5xx or network failure. Worth retrying; not the caller's fault."""
 
 
+class QuotaExhaustedError(Exception):
+    """The provider's allowance for the day is spent.
+
+    Deliberately not retried: `with_retries` lets it through at once, because
+    no amount of waiting inside one request will bring the quota back.
+    """
+
+
 async def with_retries(
     operation: Callable[[], Awaitable[T]],
     *,

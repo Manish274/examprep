@@ -62,11 +62,20 @@ class Settings(BaseSettings):
     # Reads content out of images: screenshotted tables, pasted formulas,
     # diagrams, and scanned PDF pages that carry no text layer at all.
     VISION_PROVIDER: str = "noop"
-    VISION_MODEL: str = "gemini-3.5-flash-lite"
+    # A model of its own: the free tier's daily allowance is per model, and
+    # sharing one with LLM_UTILITY_MODEL would let one scanned upload use up
+    # the query rewriting every chat question needs.
+    VISION_MODEL: str = "gemini-3.1-flash-lite"
     VISION_MAX_RPM: int = 15
+    # Images per request. The free tier limits requests a day, not tokens, so
+    # four to a request reads four times the material before the day is spent.
+    VISION_BATCH_SIZE: int = 4
+    # Requests in flight at once, still within VISION_MAX_RPM.
+    VISION_CONCURRENCY: int = 2
     # Below this an image is decoration -- a bullet glyph, a rule, a logo.
     VISION_MIN_PIXELS: int = 40000
-    # Ceiling per document, so one pathological file cannot drain a day.
+    # New readings per document, so one pathological file cannot drain a day.
+    # Images already in the vision cache do not count against it.
     VISION_MAX_IMAGES: int = 40
 
     # ── free-tier rate limiting ──────────────────────────────

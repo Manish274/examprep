@@ -171,12 +171,17 @@ class QdrantStore:
 
         return written
 
-    async def delete_document(self, document_id: str, *, user_id: str) -> None:
+    async def delete_document(
+        self, document_id: str, *, user_id: str, keep: Sequence[str] = ()
+    ) -> None:
+        """Removes a document's points, except those listed in `keep` -- which
+        is how a re-ingest prunes the chunks its new version no longer has."""
+        selector = self._filter(user_id, [document_id])
+        if keep:
+            selector.must_not = [models.HasIdCondition(has_id=list(keep))]
         await self._client.delete(
             collection_name=self._collection,
-            points_selector=models.FilterSelector(
-                filter=self._filter(user_id, [document_id])
-            ),
+            points_selector=models.FilterSelector(filter=selector),
             wait=True,
         )
 

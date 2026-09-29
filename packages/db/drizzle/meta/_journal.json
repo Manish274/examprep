@@ -43,6 +43,13 @@
       "when": 1790681141391,
       "tag": "0005_drop_unwritten_columns",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1790694305066,
+      "tag": "0006_figures_after_text",
+      "breakpoints": true
     }
   ]
 }
