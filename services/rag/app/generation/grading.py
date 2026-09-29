@@ -22,6 +22,7 @@ import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
 
+from app.core.interfaces import LLMProvider
 from app.core.models import QuestionType
 from app.generation.study import messages, parse_json_items
 
@@ -120,7 +121,7 @@ def grade_objective(answer: GradableAnswer) -> GradedAnswer:
 
 
 class Grader:
-    def __init__(self, llm: object, *, batch_size: int = 8) -> None:
+    def __init__(self, llm: LLMProvider, *, batch_size: int = 8) -> None:
         self._llm = llm
         self._batch_size = batch_size
 
@@ -128,9 +129,7 @@ class Grader:
         objective = [
             a for a in answers if a.question_type is not QuestionType.SHORT_ANSWER
         ]
-        written = [
-            a for a in answers if a.question_type is QuestionType.SHORT_ANSWER
-        ]
+        written = [a for a in answers if a.question_type is QuestionType.SHORT_ANSWER]
 
         graded: dict[str, GradedAnswer] = {
             a.question_id: grade_objective(a) for a in objective
@@ -161,7 +160,7 @@ class Grader:
         user = "Mark each answer below.\n\n" + "\n".join(blocks)
 
         try:
-            response = await self._llm.complete(  # type: ignore[attr-defined]
+            response = await self._llm.complete(
                 messages(_SYSTEM, user),
                 temperature=0.0,
                 max_tokens=6000,
@@ -190,8 +189,8 @@ class Grader:
 
         for item in items:
             question_id = str(item.get("id", "")).strip()
-            answer = by_id.get(question_id)
-            if answer is None:
+            asked = by_id.get(question_id)
+            if asked is None:
                 continue
 
             try:
@@ -204,7 +203,7 @@ class Grader:
                 question_id=question_id,
                 is_correct=awarded >= CORRECT_THRESHOLD,
                 awarded=awarded,
-                feedback=str(item.get("feedback", "")).strip() or answer.explanation,
+                feedback=str(item.get("feedback", "")).strip() or asked.explanation,
             )
 
         # Anything the model skipped still needs a verdict.

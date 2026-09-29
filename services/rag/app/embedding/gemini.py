@@ -21,7 +21,6 @@ from collections.abc import Sequence
 import httpx
 
 from app.core.models import EmbeddingVector
-from app.core.registry import embedders
 from app.embedding.rate_limit import (
     RateLimiter,
     RateLimitError,
@@ -148,9 +147,7 @@ class GeminiEmbeddingProvider:
 
     # ── interface ───────────────────────────────────────────
 
-    async def embed_documents(
-        self, texts: Sequence[str]
-    ) -> list[EmbeddingVector]:
+    async def embed_documents(self, texts: Sequence[str]) -> list[EmbeddingVector]:
         if not texts:
             return []
 
@@ -169,20 +166,3 @@ class GeminiEmbeddingProvider:
         # RETRIEVAL_QUERY, not RETRIEVAL_DOCUMENT: the asymmetry is the point.
         vectors = await self._embed_batch([text], "RETRIEVAL_QUERY")
         return vectors[0]
-
-
-@embedders.register("gemini")
-def _create_gemini_embedder(
-    api_key: str,
-    model_id: str = "gemini-embedding-2",
-    dimensions: int = 3072,
-    max_rpm: int = 100,
-    batch_size: int = _MAX_BATCH,
-) -> GeminiEmbeddingProvider:
-    return GeminiEmbeddingProvider(
-        api_key,
-        model_id=model_id,
-        dimensions=dimensions,
-        max_rpm=max_rpm,
-        batch_size=batch_size,
-    )

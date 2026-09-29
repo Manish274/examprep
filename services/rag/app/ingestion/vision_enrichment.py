@@ -27,7 +27,7 @@ from app.core.models import (
     ParsedBlock,
     ParsedDocument,
 )
-from app.vision.providers import VisionUnavailableError
+from app.vision.providers import VisionProvider, VisionUnavailableError
 
 logger = logging.getLogger(__name__)
 
@@ -105,7 +105,7 @@ def select_images(
 
 async def enrich_with_vision(
     document: ParsedDocument,
-    provider: object,
+    provider: VisionProvider,
     *,
     min_pixels: int = DEFAULT_MIN_PIXELS,
     max_images: int = DEFAULT_MAX_IMAGES,
@@ -133,7 +133,7 @@ async def enrich_with_vision(
     descriptions: dict[str, str] = {}
     for image in chosen:
         try:
-            text = await provider.describe(  # type: ignore[attr-defined]
+            text = await provider.describe(
                 image.data, mime_type=image.mime_type, context_hint=image.context_hint
             )
         except VisionUnavailableError:

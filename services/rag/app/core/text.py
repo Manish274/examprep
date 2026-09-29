@@ -14,9 +14,33 @@ import uuid
 # Abbreviations whose trailing period does not end a sentence. Deliberately
 # short -- over-eager matching costs more than the occasional missed case.
 _ABBREVIATIONS = {
-    "e.g", "i.e", "etc", "vs", "cf", "al", "fig", "eq", "ref", "no", "vol",
-    "ch", "sec", "approx", "dept", "univ", "mr", "mrs", "ms", "dr", "prof",
-    "st", "jr", "sr", "inc", "ltd", "co",
+    "e.g",
+    "i.e",
+    "etc",
+    "vs",
+    "cf",
+    "al",
+    "fig",
+    "eq",
+    "ref",
+    "no",
+    "vol",
+    "ch",
+    "sec",
+    "approx",
+    "dept",
+    "univ",
+    "mr",
+    "mrs",
+    "ms",
+    "dr",
+    "prof",
+    "st",
+    "jr",
+    "sr",
+    "inc",
+    "ltd",
+    "co",
 }
 
 _SENTENCE_END = re.compile(r"(?<=[.!?])[\"')\]]*\s+")

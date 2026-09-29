@@ -180,9 +180,7 @@ def build_pdf(path: Path) -> None:
                 raise RuntimeError(
                     f"fixture overflowed page {item.page}; content would be lost"
                 )
-            page.insert_text(
-                (margin, y), line, fontsize=size, fontname=fontname
-            )
+            page.insert_text((margin, y), line, fontsize=size, fontname=fontname)
             y += leading
 
         cursors[item.page] = y + 6

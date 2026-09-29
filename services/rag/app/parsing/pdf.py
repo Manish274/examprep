@@ -22,7 +22,6 @@ from app.core.models import (
     ParsedBlock,
     ParsedDocument,
 )
-from app.core.registry import parsers
 from app.core.text import content_hash, normalize
 from app.parsing.structure import LineRecord, detect_heading_levels
 
@@ -273,9 +272,7 @@ def _starts_new_paragraph(
     # A vertical gap materially wider than this document's normal leading is a
     # paragraph break. PDFs record no paragraph markers, so spacing is the only
     # signal available -- and paragraph edges make good chunk edges.
-    threshold = baseline_gap + max(
-        2.0, _PARAGRAPH_GAP_RATIO * previous.font_size
-    )
+    threshold = baseline_gap + max(2.0, _PARAGRAPH_GAP_RATIO * previous.font_size)
     return line.bbox[1] - previous.bbox[3] > threshold
 
 
@@ -408,8 +405,3 @@ class PyMuPDFParser:
     ) -> ParsedDocument:
         # PyMuPDF is synchronous and CPU-bound; keep it off the event loop.
         return await asyncio.to_thread(self._parse_sync, path, document_id, filename)
-
-
-@parsers.register("pymupdf")
-def _create_pdf_parser() -> PyMuPDFParser:
-    return PyMuPDFParser()

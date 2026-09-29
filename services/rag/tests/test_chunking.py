@@ -136,9 +136,7 @@ class TestSentenceBoundaries:
 class TestOverlap:
     def test_carries_context_between_chunks_of_one_section(self) -> None:
         sentences = [f"Alpha {i} beta gamma delta epsilon zeta." for i in range(40)]
-        document = _doc(
-            _heading("Section", 1, 0), _para(" ".join(sentences), 1)
-        )
+        document = _doc(_heading("Section", 1, 0), _para(" ".join(sentences), 1))
         chunks = _chunker(target_tokens=60, overlap_tokens=20).chunk(document)
 
         assert len(chunks) > 1
@@ -340,9 +338,7 @@ class TestEdgeCases:
 
 class TestFixedWindowBaseline:
     def test_produces_chunks_of_roughly_the_target_size(self) -> None:
-        document = _doc(
-            _para(" ".join(f"word{i}" for i in range(600)), 0)
-        )
+        document = _doc(_para(" ".join(f"word{i}" for i in range(600)), 0))
         chunks = FixedWindowChunker(
             target_tokens=100, overlap_tokens=10, counter=COUNTER
         ).chunk(document)

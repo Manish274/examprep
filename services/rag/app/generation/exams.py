@@ -13,11 +13,12 @@ a supplied chunk is discarded rather than shown.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from collections.abc import Sequence
 from dataclasses import dataclass, field
+from typing import Any
 
+from app.core.interfaces import LLMProvider
 from app.core.models import Chunk, QuestionType
 from app.generation.study import (
     DEFAULT_BATCH_SIZE,
@@ -109,7 +110,7 @@ class ExamGenerationResult:
         }
 
 
-def _normalise_mcq(item: dict) -> tuple[list[str], str] | None:
+def _normalise_mcq(item: dict[str, Any]) -> tuple[list[str], str] | None:
     """Validates an MCQ and returns its options and the correct index.
 
     The correct answer is stored as an index rather than the option text, so a
@@ -143,7 +144,7 @@ def _normalise_mcq(item: dict) -> tuple[list[str], str] | None:
 
 
 def _to_question(
-    item: dict,
+    item: dict[str, Any],
     chunk: Chunk,
     allowed: Sequence[QuestionType] | None = None,
 ) -> GeneratedQuestion | None:
@@ -198,7 +199,9 @@ def _to_question(
 
 
 class ExamGenerator:
-    def __init__(self, llm: object, *, batch_size: int = DEFAULT_BATCH_SIZE) -> None:
+    def __init__(
+        self, llm: LLMProvider, *, batch_size: int = DEFAULT_BATCH_SIZE
+    ) -> None:
         self._llm = llm
         self._batch_size = batch_size
 
@@ -209,7 +212,6 @@ class ExamGenerator:
         question_count: int = 10,
         types: Sequence[QuestionType] | None = None,
         difficulty: str = "mixed",
-        on_progress: object | None = None,
     ) -> ExamGenerationResult:
         wanted = list(types or [QuestionType.MCQ, QuestionType.SHORT_ANSWER])
         result = ExamGenerationResult()
@@ -239,7 +241,7 @@ class ExamGenerator:
             )
 
             try:
-                response = await self._llm.complete(  # type: ignore[attr-defined]
+                response = await self._llm.complete(
                     messages(_SYSTEM, user),
                     temperature=0.6,
                     max_tokens=8000,
@@ -269,11 +271,6 @@ class ExamGenerator:
                     result.discarded += 1
                     continue
                 result.questions.append(question)
-
-            if on_progress is not None:
-                on_progress(len(result.questions), question_count)  # type: ignore[operator]
-
-            await asyncio.sleep(0)
 
         logger.info("generated test: %s", result.as_dict())
         return result

@@ -112,9 +112,7 @@ class SyntheticGoldSetBuilder:
                     f"gold generation rate limited: {response.text[:160]}"
                 )
             if response.status_code >= 500:
-                raise TransientError(
-                    f"gold generation upstream {response.status_code}"
-                )
+                raise TransientError(f"gold generation upstream {response.status_code}")
             response.raise_for_status()
 
             parts = response.json()["candidates"][0]["content"]["parts"]
@@ -155,9 +153,7 @@ class SyntheticGoldSetBuilder:
         results = await asyncio.gather(*(one(c) for c in chunks))
         gold = [g for g in results if g is not None]
 
-        logger.info(
-            "generated %s gold queries from %s chunks", len(gold), len(chunks)
-        )
+        logger.info("generated %s gold queries from %s chunks", len(gold), len(chunks))
         return gold
 
 

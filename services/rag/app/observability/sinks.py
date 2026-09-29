@@ -32,8 +32,6 @@ from typing import Any
 import asyncpg
 import httpx
 
-from app.core.registry import tracers
-
 logger = logging.getLogger(__name__)
 
 # Namespace for turning a non-UUID correlation id (an eval run's name, a
@@ -356,9 +354,7 @@ class LangfuseTracer(_QueuedSink):
     ) -> None:
         super().__init__(queue_size)
         self._host = host.rstrip("/")
-        self._auth = base64.b64encode(
-            f"{public_key}:{secret_key}".encode()
-        ).decode()
+        self._auth = base64.b64encode(f"{public_key}:{secret_key}".encode()).decode()
         self._client = client
         self._owns_client = client is None
 
@@ -465,15 +461,3 @@ class MultiTracer:
             for key, value in sink.stats().items():
                 merged[f"{sink.name}_{key}"] = value
         return merged
-
-
-# Registered so the available sinks are discoverable by name, the same way
-# every other swappable stage is.
-tracers.register("noop")(lambda **_: NoOpTracer())
-tracers.register("memory")(lambda **_: InMemoryTracer())
-tracers.register("postgres")(lambda dsn, **_: PostgresTracer(dsn))
-tracers.register("langfuse")(
-    lambda public_key, secret_key, host, **_: LangfuseTracer(
-        public_key, secret_key, host
-    )
-)

@@ -26,7 +26,6 @@ from typing import Any
 import httpx
 
 from app.core.models import LLMMessage, LLMResponse, LLMUsage
-from app.core.registry import llms
 from app.embedding.rate_limit import (
     RateLimiter,
     RateLimitError,
@@ -256,9 +255,7 @@ class GeminiLLMProvider:
         for attempt in range(attempts):
             emitted = False
             try:
-                async for delta in self._stream_once(
-                    messages, temperature, max_tokens
-                ):
+                async for delta in self._stream_once(messages, temperature, max_tokens):
                     emitted = True
                     yield delta
                 return
@@ -296,42 +293,22 @@ class GeminiLLMProvider:
                 json=payload,
             ) as response,
         ):
-                if response.status_code != 200:
-                    await response.aread()
-                    self._check(response, sent_thinking=sent_thinking)
+            if response.status_code != 200:
+                await response.aread()
+                self._check(response, sent_thinking=sent_thinking)
 
-                async for line in response.aiter_lines():
-                    if not line.startswith("data:"):
-                        continue
-                    raw = line[5:].strip()
-                    if not raw or raw == "[DONE]":
-                        continue
-                    try:
-                        chunk = json.loads(raw)
-                    except json.JSONDecodeError:
-                        logger.debug("skipping unparseable stream line: %s", raw[:120])
-                        continue
+            async for line in response.aiter_lines():
+                if not line.startswith("data:"):
+                    continue
+                raw = line[5:].strip()
+                if not raw or raw == "[DONE]":
+                    continue
+                try:
+                    chunk = json.loads(raw)
+                except json.JSONDecodeError:
+                    logger.debug("skipping unparseable stream line: %s", raw[:120])
+                    continue
 
-                    text = self._text_from(chunk)
-                    if text:
-                        yield text
-
-
-@llms.register("mock")
-def _create_mock(**_: object) -> MockLLMProvider:
-    return MockLLMProvider()
-
-
-@llms.register("gemini")
-def _create_gemini(
-    api_key: str,
-    model_id: str = "gemini-3.8-flash",
-    max_rpm: int = 15,
-    thinking_budget: int | None = None,
-) -> GeminiLLMProvider:
-    return GeminiLLMProvider(
-        api_key,
-        model_id=model_id,
-        max_rpm=max_rpm,
-        thinking_budget=thinking_budget,
-    )
+                text = self._text_from(chunk)
+                if text:
+                    yield text

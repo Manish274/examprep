@@ -84,7 +84,29 @@ async def config_summary(settings: SettingsDep) -> dict[str, Any]:
             "context_max_tokens": settings.CONTEXT_MAX_TOKENS,
         },
         "embedding": {
+            "provider": settings.EMBEDDING_PROVIDER,
             "model": settings.EMBEDDING_MODEL,
             "dimensions": settings.EMBEDDING_DIMENSIONS,
+        },
+        "generation": {
+            "provider": settings.LLM_PROVIDER,
+            "model": settings.LLM_MODEL,
+            "utility_model": settings.LLM_UTILITY_MODEL,
+        },
+        "reranker": {"provider": settings.RERANKER_PROVIDER},
+        "vision": {
+            "provider": settings.VISION_PROVIDER,
+            "model": settings.VISION_MODEL,
+            "min_pixels": settings.VISION_MIN_PIXELS,
+            "max_images": settings.VISION_MAX_IMAGES,
+        },
+        "chat": {
+            "history_turns": settings.CHAT_HISTORY_TURNS,
+            "history_max_tokens": settings.CHAT_HISTORY_MAX_TOKENS,
+            "recheck_min_relevance": settings.CHAT_RECHECK_MIN_RELEVANCE,
+            "off_topic_max_similarity": settings.CHAT_OFF_TOPIC_MAX_SIMILARITY,
+            "off_topic_max_relevance": settings.CHAT_OFF_TOPIC_MAX_RELEVANCE,
+            "overview_max_chunks": settings.CHAT_OVERVIEW_MAX_CHUNKS,
+            "overview_max_tokens": settings.CHAT_OVERVIEW_MAX_TOKENS,
         },
     }

@@ -23,7 +23,9 @@ import time
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
+from app.core.interfaces import Retrieval
 from app.core.models import RetrievalStrategy
 from app.eval.metrics import aggregate, evaluate_query
 from app.eval.significance import Comparison, compare_all
@@ -43,7 +45,7 @@ class GoldQuery:
     note: str = ""
 
     @classmethod
-    def from_dict(cls, raw: dict) -> GoldQuery:
+    def from_dict(cls, raw: dict[str, Any]) -> GoldQuery:
         return cls(
             question=raw["question"],
             relevant_chunk_ids=set(raw["relevant_chunk_ids"]),
@@ -52,7 +54,7 @@ class GoldQuery:
             note=raw.get("note", ""),
         )
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "question": self.question,
             "relevant_chunk_ids": sorted(self.relevant_chunk_ids),
@@ -151,7 +153,7 @@ class EvaluationReport:
             metrics=metrics,
         )
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "query_count": self.query_count,
             "k_values": self.k_values,
@@ -176,10 +178,7 @@ class EvaluationReport:
     def to_table(self, metrics: Sequence[str] | None = None) -> str:
         """A fixed-width comparison table. Reading four strategies across ten
         metrics is the whole point, and JSON does not support that."""
-        shown = list(
-            metrics
-            or ["recall@5", "precision@5", "mrr", "ndcg@5", "hit@5"]
-        )
+        shown = list(metrics or ["recall@5", "precision@5", "mrr", "ndcg@5", "hit@5"])
         header = (
             f"{'strategy':<16}"
             + "".join(f"{m:>13}" for m in shown)
@@ -214,7 +213,7 @@ DEFAULT_STRATEGIES = (
 
 
 class EvaluationHarness:
-    def __init__(self, retrieval: object) -> None:
+    def __init__(self, retrieval: Retrieval) -> None:
         self._retrieval = retrieval
 
     async def run(
@@ -238,7 +237,7 @@ class EvaluationHarness:
             for query in gold:
                 query_started = time.perf_counter()
                 try:
-                    retrieved = await self._retrieval.search(  # type: ignore[attr-defined]
+                    retrieved = await self._retrieval.search(
                         query.question,
                         user_id=user_id,
                         strategy=strategy,

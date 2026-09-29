@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from app.core.models import Chunk, ChunkMetadata, ScoredChunk
-from app.retrieval.fusion import ReciprocalRankFusion, WeightedScoreFusion
+from app.retrieval.fusion import ReciprocalRankFusion
 
 
 def _scored(
@@ -113,30 +113,3 @@ class TestReciprocalRankFusion:
     def test_rejects_a_nonsensical_k(self) -> None:
         with pytest.raises(ValueError, match="k must be positive"):
             ReciprocalRankFusion(k=0)
-
-
-class TestWeightedScoreFusion:
-    def test_normalises_before_combining(self) -> None:
-        # Without normalisation the BM25 side would dominate outright. This is
-        # the fragility RRF avoids, kept measurable rather than asserted.
-        dense = [_scored("a", 0.9, dense=0.9), _scored("b", 0.1, dense=0.1)]
-        sparse = [_scored("b", 900.0, sparse=900.0), _scored("a", 100.0, sparse=100.0)]
-
-        fused = WeightedScoreFusion().fuse([dense, sparse], top_k=10)
-        assert {f.chunk.id for f in fused} == {"a", "b"}
-        assert fused[0].score == pytest.approx(fused[1].score)
-
-    def test_weights_shift_the_balance(self) -> None:
-        dense = [_scored("a", 1.0, dense=1.0), _scored("b", 0.0, dense=0.0)]
-        sparse = [_scored("b", 1.0, sparse=1.0), _scored("a", 0.0, sparse=0.0)]
-
-        dense_heavy = WeightedScoreFusion([0.9, 0.1]).fuse([dense, sparse], top_k=2)
-        sparse_heavy = WeightedScoreFusion([0.1, 0.9]).fuse([dense, sparse], top_k=2)
-
-        assert dense_heavy[0].chunk.id == "a"
-        assert sparse_heavy[0].chunk.id == "b"
-
-    def test_handles_a_ranking_where_every_score_is_equal(self) -> None:
-        # A zero spread would divide by zero in min-max normalisation.
-        ranking = [_scored("a", 1.0, index=0), _scored("b", 1.0, index=1)]
-        assert len(WeightedScoreFusion().fuse([ranking], top_k=10)) == 2

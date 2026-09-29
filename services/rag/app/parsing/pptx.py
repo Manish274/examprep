@@ -28,7 +28,6 @@ from app.core.models import (
     ParsedBlock,
     ParsedDocument,
 )
-from app.core.registry import parsers
 from app.core.text import content_hash, normalize
 
 logger = logging.getLogger(__name__)
@@ -220,9 +219,7 @@ class PythonPptxParser:
                         )
                         blocks.extend(new_blocks)
                 except (AttributeError, ValueError) as exc:
-                    logger.debug(
-                        "skipped shape on slide %s: %s", slide_number, exc
-                    )
+                    logger.debug("skipped shape on slide %s: %s", slide_number, exc)
 
             if slide.has_notes_slide:
                 notes = normalize(slide.notes_slide.notes_text_frame.text)
@@ -267,8 +264,3 @@ class PythonPptxParser:
         self, path: Path, *, document_id: str, filename: str
     ) -> ParsedDocument:
         return await asyncio.to_thread(self._parse_sync, path, document_id, filename)
-
-
-@parsers.register("python-pptx")
-def _create_pptx_parser() -> PythonPptxParser:
-    return PythonPptxParser()

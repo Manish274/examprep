@@ -22,6 +22,7 @@ import logging
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import Any
 
 from app.core.models import Chunk, LLMMessage
 
@@ -73,7 +74,7 @@ class LabelledBatch:
 
 
 def _normalise_heading(heading: str) -> str:
-    """"7. References:" -> "references"."""
+    """ "7. References:" -> "references"."""
     text = heading.strip().lower()
     text = re.sub(r"^\d+(\.\d+)*\.?\s+", "", text)
     return re.sub(r"[\s:.!?\-]+$", "", text)
@@ -159,7 +160,7 @@ def batches(
     return result
 
 
-def parse_json_items(raw: str) -> list[dict]:
+def parse_json_items(raw: str) -> list[dict[str, Any]]:
     """Extracts a JSON array from a model response.
 
     Structured output usually returns clean JSON, but a fenced block or a line
@@ -190,7 +191,7 @@ def parse_json_items(raw: str) -> list[dict]:
     return [item for item in parsed if isinstance(item, dict)]
 
 
-def resolve_source(item: dict, batch: LabelledBatch) -> Chunk | None:
+def resolve_source(item: dict[str, Any], batch: LabelledBatch) -> Chunk | None:
     """Maps an item's claimed source label back to a real chunk.
 
     Returns None when the model names a label that was not in the batch, which

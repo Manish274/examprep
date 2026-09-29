@@ -49,24 +49,42 @@ pytestmark = pytest.mark.skipif(
 
 CORPUS = [
     # (document_id, heading, text)
-    ("doc-db", "First Normal Form",
-     "A relation is in first normal form 1NF if every attribute contains only "
-     "atomic values and repeating groups are not permitted."),
-    ("doc-db", "Second Normal Form",
-     "A relation is in second normal form 2NF if it is in 1NF and every "
-     "non-prime attribute is fully functionally dependent on every candidate key."),
-    ("doc-db", "Third Normal Form",
-     "A relation is in third normal form 3NF if it is in 2NF and no non-prime "
-     "attribute is transitively dependent on any candidate key."),
-    ("doc-db", "Denormalization",
-     "Denormalization deliberately introduces redundancy to improve read "
-     "performance, trading write cost for query speed."),
-    ("doc-idx", "B-Tree Indexes",
-     "A balanced tree structure with logarithmic lookup that supports both "
-     "equality and range queries."),
-    ("doc-idx", "Hash Indexes",
-     "A hash index supports equality lookups only and cannot answer range "
-     "queries at all."),
+    (
+        "doc-db",
+        "First Normal Form",
+        "A relation is in first normal form 1NF if every attribute contains only "
+        "atomic values and repeating groups are not permitted.",
+    ),
+    (
+        "doc-db",
+        "Second Normal Form",
+        "A relation is in second normal form 2NF if it is in 1NF and every "
+        "non-prime attribute is fully functionally dependent on every candidate key.",
+    ),
+    (
+        "doc-db",
+        "Third Normal Form",
+        "A relation is in third normal form 3NF if it is in 2NF and no non-prime "
+        "attribute is transitively dependent on any candidate key.",
+    ),
+    (
+        "doc-db",
+        "Denormalization",
+        "Denormalization deliberately introduces redundancy to improve read "
+        "performance, trading write cost for query speed.",
+    ),
+    (
+        "doc-idx",
+        "B-Tree Indexes",
+        "A balanced tree structure with logarithmic lookup that supports both "
+        "equality and range queries.",
+    ),
+    (
+        "doc-idx",
+        "Hash Indexes",
+        "A hash index supports equality lookups only and cannot answer range "
+        "queries at all.",
+    ),
 ]
 
 
@@ -100,8 +118,7 @@ async def service():
     encoder = Bm25Encoder()
 
     chunks = [
-        _chunk(i, doc, heading, text)
-        for i, (doc, heading, text) in enumerate(CORPUS)
+        _chunk(i, doc, heading, text) for i, (doc, heading, text) in enumerate(CORPUS)
     ]
     texts = [c.embedding_text() for c in chunks]
     vectors = await embedder.embed_documents(texts)
@@ -116,11 +133,15 @@ async def service():
     dense = DenseRetriever(store, embedder)
     sparse = SparseRetriever(store, encoder)
     try:
-        yield RetrievalService(
-            dense=dense,
-            sparse=sparse,
-            hybrid=HybridRetriever(dense, sparse, ReciprocalRankFusion()),
-        ), store, chunks
+        yield (
+            RetrievalService(
+                dense=dense,
+                sparse=sparse,
+                hybrid=HybridRetriever(dense, sparse, ReciprocalRankFusion()),
+            ),
+            store,
+            chunks,
+        )
     finally:
         await client.delete_collection(collection)
         await client.close()
@@ -232,9 +253,7 @@ class TestHybridRetrieval:
 
 
 class TestMetadataRoundTrip:
-    async def test_citation_metadata_survives_the_vector_store(
-        self, service
-    ) -> None:
+    async def test_citation_metadata_survives_the_vector_store(self, service) -> None:
         # A grounded answer is only as good as the source it points at, so this
         # is the property the whole pipeline exists to preserve.
         retrieval, _, _ = service
@@ -257,9 +276,7 @@ class TestIsolation:
         # nothing about identity beyond that.
         retrieval, _, _ = service
         for strategy in RetrievalStrategy:
-            assert (
-                await retrieval.search("3NF", user_id=BOB, strategy=strategy) == []
-            )
+            assert await retrieval.search("3NF", user_id=BOB, strategy=strategy) == []
 
     async def test_document_filter_scopes_the_search(self, service) -> None:
         retrieval, _, _ = service
@@ -294,9 +311,7 @@ class TestStoreMaintenance:
         )
         assert all(r.chunk.metadata.document_id != "doc-idx" for r in results)
 
-    async def test_reindexing_replaces_rather_than_duplicates(
-        self, service
-    ) -> None:
+    async def test_reindexing_replaces_rather_than_duplicates(self, service) -> None:
         # A re-ingest must not leave the previous generation of chunks in the
         # index beside the new one.
         _, store, chunks = service
@@ -321,9 +336,7 @@ class TestStoreMaintenance:
         # nothing downstream would notice.
         _, store, chunks = service
         with pytest.raises(ValueError, match="length mismatch"):
-            await store.upsert_chunks(
-                chunks, [[0.0] * DIMENSIONS], [], user_id=ALICE
-            )
+            await store.upsert_chunks(chunks, [[0.0] * DIMENSIONS], [], user_id=ALICE)
 
 
 class TestCollectionSchema:
@@ -361,9 +374,7 @@ class TestGoldSetValidation:
 
         assert known == {chunks[0].id}
 
-    async def test_another_users_chunks_do_not_count_as_known(
-        self, service
-    ) -> None:
+    async def test_another_users_chunks_do_not_count_as_known(self, service) -> None:
         _, store, chunks = service
         assert await store.known_chunk_ids([c.id for c in chunks], user_id=BOB) == set()
 
@@ -372,8 +383,6 @@ class TestGoldSetValidation:
         # gold set into a failed request instead of a named problem.
         _, store, chunks = service
 
-        known = await store.known_chunk_ids(
-            [chunks[0].id, "not-a-uuid"], user_id=ALICE
-        )
+        known = await store.known_chunk_ids([chunks[0].id, "not-a-uuid"], user_id=ALICE)
 
         assert known == {chunks[0].id}

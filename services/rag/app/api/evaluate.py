@@ -16,7 +16,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from app.api.deps import InternalAuth, SettingsDep
-from app.container import get_container
+from app.container import Container, get_container
 from app.core.models import RetrievalStrategy
 from app.eval.gold_set import SyntheticGoldSetBuilder
 from app.eval.harness import (
@@ -97,16 +97,14 @@ def _resolve_gold(request: EvaluateRequest) -> list[GoldQuery]:
 
 
 async def _stale_ids(
-    container: Any, gold: list[GoldQuery], user_id: str
+    container: Container, gold: list[GoldQuery], user_id: str
 ) -> set[str]:
     """Gold chunk ids that are no longer in the index."""
     wanted = {chunk_id for query in gold for chunk_id in query.relevant_chunk_ids}
     if not wanted:
         return set()
     try:
-        known = await container.store.known_chunk_ids(
-            sorted(wanted), user_id=user_id
-        )
+        known = await container.store.known_chunk_ids(sorted(wanted), user_id=user_id)
     except Exception as exc:
         # A check that cannot run must not block the evaluation it was only
         # meant to annotate.

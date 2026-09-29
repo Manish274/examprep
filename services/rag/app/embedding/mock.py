@@ -20,7 +20,6 @@ import re
 from collections.abc import Sequence
 
 from app.core.models import EmbeddingVector
-from app.core.registry import embedders
 
 _WORD = re.compile(r"[a-z0-9]+")
 
@@ -66,8 +65,3 @@ class MockEmbeddingProvider:
 
     async def embed_query(self, text: str) -> EmbeddingVector:
         return self._embedding(text)
-
-
-@embedders.register("mock")
-def _create_mock_embedder(dimensions: int = 768, **_: object) -> MockEmbeddingProvider:
-    return MockEmbeddingProvider(dimensions=dimensions)

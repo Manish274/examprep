@@ -196,9 +196,7 @@ class TestChunkerSelection:
         self, client: httpx.AsyncClient
     ) -> None:
         body = (
-            await client.post(
-                "/ingest", json=_pdf_body(chunker="fixed_window")
-            )
+            await client.post("/ingest", json=_pdf_body(chunker="fixed_window"))
         ).json()
 
         assert body["chunker"] == "fixed_window"
@@ -223,9 +221,7 @@ class TestFailureModes:
         )
         assert response.status_code == 404
 
-    async def test_path_traversal_is_rejected(
-        self, client: httpx.AsyncClient
-    ) -> None:
+    async def test_path_traversal_is_rejected(self, client: httpx.AsyncClient) -> None:
         response = await client.post(
             "/ingest", json=_pdf_body(storage_key="../../../etc/passwd")
         )
@@ -238,9 +234,7 @@ class TestFailureModes:
         # so the student can be told what to do about it.
         response = await client.post(
             "/ingest",
-            json=_pdf_body(
-                filename="empty.pdf", storage_key="user-1/empty.pdf"
-            ),
+            json=_pdf_body(filename="empty.pdf", storage_key="user-1/empty.pdf"),
         )
         assert response.status_code == 422
         assert "scanned" in response.json()["detail"].lower()
@@ -343,9 +337,7 @@ class TestIndexing:
         for stage in ("parse_ms", "chunk_ms", "embed_ms", "sparse_ms", "index_ms"):
             assert stage in timings
 
-    async def test_preview_does_not_index(
-        self, client: httpx.AsyncClient
-    ) -> None:
+    async def test_preview_does_not_index(self, client: httpx.AsyncClient) -> None:
         # Preview exists for inspecting chunk boundaries while tuning; it must
         # not leave anything behind in the store.
         from app.container import get_container
@@ -440,9 +432,7 @@ class TestDeterministicChunkIds:
         first = (await client.post("/ingest", json=_pdf_body())).json()
         second = (await client.post("/ingest", json=_pdf_body())).json()
 
-        assert [c["id"] for c in first["chunks"]] == [
-            c["id"] for c in second["chunks"]
-        ]
+        assert [c["id"] for c in first["chunks"]] == [c["id"] for c in second["chunks"]]
 
 
 class TestDuplicateChunks:

@@ -236,7 +236,8 @@ class TestReportTable:
         )
         report = await EvaluationHarness(retrieval).run(GOLD, user_id="u")
         winner_row = next(
-            line for line in report.to_table().splitlines()
+            line
+            for line in report.to_table().splitlines()
             if line.startswith("hybrid_rerank")
         )
         assert "*" in winner_row

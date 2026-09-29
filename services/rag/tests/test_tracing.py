@@ -372,7 +372,7 @@ class TestMiddleware:
         await wrapped(
             {
                 "type": "http",
-                "path": "/chat",
+                "path": "/chat/stream",
                 "method": "POST",
                 "headers": [(b"x-correlation-id", correlation.encode())],
             },

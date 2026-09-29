@@ -65,11 +65,8 @@ class QdrantStore:
         if await self._client.collection_exists(self._collection):
             info = await self._client.get_collection(self._collection)
             vectors = info.config.params.vectors
-            existing = (
-                vectors.get(DENSE).size
-                if isinstance(vectors, dict) and DENSE in vectors
-                else None
-            )
+            dense = vectors.get(DENSE) if isinstance(vectors, dict) else None
+            existing = dense.size if dense is not None else None
             if existing is not None and existing != self._dimensions:
                 raise RuntimeError(
                     f"Collection '{self._collection}' holds {existing}-dimensional "
@@ -186,13 +183,9 @@ class QdrantStore:
     # ── reading ─────────────────────────────────────────────
 
     @staticmethod
-    def _filter(
-        user_id: str, document_ids: Sequence[str] | None
-    ) -> models.Filter:
+    def _filter(user_id: str, document_ids: Sequence[str] | None) -> models.Filter:
         must: list[models.Condition] = [
-            models.FieldCondition(
-                key="user_id", match=models.MatchValue(value=user_id)
-            )
+            models.FieldCondition(key="user_id", match=models.MatchValue(value=user_id))
         ]
         if document_ids:
             must.append(
@@ -265,9 +258,7 @@ class QdrantStore:
 
         response = await self._client.query_points(
             collection_name=self._collection,
-            query=models.SparseVector(
-                indices=vector.indices, values=vector.values
-            ),
+            query=models.SparseVector(indices=vector.indices, values=vector.values),
             using=SPARSE,
             limit=top_k,
             query_filter=self._filter(user_id, document_ids),

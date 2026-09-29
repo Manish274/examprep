@@ -16,8 +16,10 @@ import logging
 from qdrant_client import AsyncQdrantClient
 
 from app.config import Settings
+from app.core.interfaces import EmbeddingProvider, LLMProvider, Reranker, Tracer
 from app.embedding.cache import (
     CachedEmbeddingProvider,
+    EmbeddingCache,
     InMemoryEmbeddingCache,
     PostgresEmbeddingCache,
 )
@@ -51,46 +53,51 @@ from app.vision.providers import (
     GeminiVisionProvider,
     MockVisionProvider,
     NoOpVisionProvider,
+    VisionProvider,
 )
 
 logger = logging.getLogger(__name__)
 
 
-def build_embedder(settings: Settings) -> object:
+def build_embedder(
+    settings: Settings, cache: EmbeddingCache | None = None
+) -> EmbeddingProvider:
+    """Selects the embedding model, behind the shared cache.
+
+    `cache` replaces the Postgres cache a real provider is given; tests pass
+    an in-memory one.
+    """
     provider = settings.EMBEDDING_PROVIDER.lower()
 
+    if provider == "mock":
+        # Keeps the configured width, so a switch between providers does not
+        # silently change the collection's vector size. Not cached: it costs
+        # nothing to run, and caching would only add a database round trip.
+        return MockEmbeddingProvider(dimensions=settings.EMBEDDING_DIMENSIONS)
     if provider == "gemini":
         if not settings.GEMINI_API_KEY:
             raise RuntimeError(
                 "EMBEDDING_PROVIDER=gemini but GEMINI_API_KEY is empty. "
                 "Set the key or switch the provider to 'mock'."
             )
-        inner: object = GeminiEmbeddingProvider(
+        inner = GeminiEmbeddingProvider(
             settings.GEMINI_API_KEY,
             model_id=settings.EMBEDDING_MODEL,
             dimensions=settings.EMBEDDING_DIMENSIONS,
             max_rpm=settings.EMBEDDING_MAX_RPM,
             batch_size=settings.EMBEDDING_BATCH_SIZE,
         )
-    elif provider == "mock":
-        # The mock keeps the configured width so a switch between providers
-        # does not silently change the collection's vector size.
-        inner = MockEmbeddingProvider(dimensions=settings.EMBEDDING_DIMENSIONS)
-    else:
-        raise ValueError(
-            f"Unknown EMBEDDING_PROVIDER '{settings.EMBEDDING_PROVIDER}'. "
-            "Available: gemini, mock"
+        return CachedEmbeddingProvider(
+            inner, cache or PostgresEmbeddingCache(settings.DATABASE_URL)
         )
 
-    # The mock costs nothing to run, so caching it would only add a database
-    # round trip and make cache-hit assertions in tests meaningless.
-    if provider == "mock":
-        return inner
-
-    return CachedEmbeddingProvider(inner, PostgresEmbeddingCache(settings.DATABASE_URL))
+    raise ValueError(
+        f"Unknown EMBEDDING_PROVIDER '{settings.EMBEDDING_PROVIDER}'. "
+        "Available: gemini, mock"
+    )
 
 
-def build_reranker(settings: Settings) -> object:
+def build_reranker(settings: Settings) -> Reranker:
     """Selects the reranker.
 
     Defaults to noop rather than silently degrading to something weaker: a run
@@ -125,7 +132,7 @@ def build_reranker(settings: Settings) -> object:
     )
 
 
-def build_vision(settings: Settings) -> object:
+def build_vision(settings: Settings) -> VisionProvider:
     """Selects the vision provider.
 
     Defaults to noop, which is exactly the behaviour before images were read at
@@ -156,7 +163,7 @@ def build_vision(settings: Settings) -> object:
     )
 
 
-def build_llm(settings: Settings, *, utility: bool = False) -> object:
+def build_llm(settings: Settings, *, utility: bool = False) -> LLMProvider:
     """Selects the generation model.
 
     The utility model is a separate, cheaper one for query rewriting: high
@@ -187,8 +194,7 @@ def build_llm(settings: Settings, *, utility: bool = False) -> object:
     )
 
 
-
-def build_tracer(settings: Settings) -> object:
+def build_tracer(settings: Settings) -> Tracer:
     """Selects where trace records go.
 
     Accepts a comma-separated list, because the local table and Langfuse answer
@@ -204,7 +210,7 @@ def build_tracer(settings: Settings) -> object:
     if not names or names == ["none"]:
         return NoOpTracer()
 
-    sinks: list[object] = []
+    sinks: list[Tracer] = []
     for name in names:
         if name in {"none", "noop"}:
             sinks.append(NoOpTracer())
@@ -234,19 +240,19 @@ def build_tracer(settings: Settings) -> object:
     return sinks[0] if len(sinks) == 1 else MultiTracer(sinks)
 
 
-def recheck_threshold(settings: Settings, reranker: object) -> float | None:
+def recheck_threshold(settings: Settings, reranker: Reranker) -> float | None:
     """The refusal-recheck threshold, or None when the scores cannot support it.
 
     A rank-derived score gives the top passage 1.0 however irrelevant it is, so
     against one every refusal would look like a contradiction.
     """
-    if not getattr(reranker, "calibrated", False):
+    if not reranker.calibrated:
         return None
     return settings.CHAT_RECHECK_MIN_RELEVANCE
 
 
 def off_topic_thresholds(
-    settings: Settings, reranker: object
+    settings: Settings, reranker: Reranker
 ) -> tuple[float, float] | None:
     """(similarity, relevance) bounds for skipping an off-topic question.
 
@@ -254,7 +260,7 @@ def off_topic_thresholds(
     half of the test means nothing, and similarity alone overlaps between
     terse real questions and small talk.
     """
-    if not getattr(reranker, "calibrated", False):
+    if not reranker.calibrated:
         return None
     return (
         settings.CHAT_OFF_TOPIC_MAX_SIMILARITY,
@@ -265,10 +271,16 @@ def off_topic_thresholds(
 class Container:
     """Holds the wired pipeline and owns the lifetimes of its clients."""
 
-    def __init__(self, settings: Settings) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        *,
+        tracer: Tracer | None = None,
+        embedding_cache: EmbeddingCache | None = None,
+    ) -> None:
         self.settings = settings
-        self.tracer = build_tracer(settings)
-        self.embedder = build_embedder(settings)
+        self.tracer = tracer or build_tracer(settings)
+        self.embedder = build_embedder(settings, embedding_cache)
         self.sparse_encoder = Bm25Encoder()
         self.reranker = build_reranker(settings)
         self.vision = build_vision(settings)
@@ -330,10 +342,9 @@ class Container:
     async def shutdown(self) -> None:
         # Flushed first: the last spans of a run are the ones explaining why it
         # is shutting down.
-        await self.tracer.close()  # type: ignore[attr-defined]
-        cache = getattr(self.embedder, "_cache", None)
-        if isinstance(cache, PostgresEmbeddingCache):
-            await cache.close()
+        await self.tracer.close()
+        if isinstance(self.embedder, CachedEmbeddingProvider):
+            await self.embedder.close()
         await self.qdrant.close()
 
 
@@ -352,40 +363,14 @@ def set_container(container: Container | None) -> None:
 
 
 def build_test_container(settings: Settings) -> Container:
-    """A container with the embedding cache held in memory.
+    """A container that needs neither Postgres nor a trace table.
 
-    Tests must not depend on Postgres being reachable, and must not pollute the
-    shared cache with vectors from throwaway fixtures. The same applies to
-    traces: a test asserting on what was recorded should read it back from
-    memory, not from a database it did not start.
+    The embedding cache and the trace sink are held in memory: tests must not
+    depend on a database being reachable, must not fill the shared cache with
+    vectors from throwaway fixtures, and read what was traced back from memory.
     """
-    container = Container(settings)
-    container.tracer = InMemoryTracer()
-    if isinstance(container.embedder, CachedEmbeddingProvider):
-        container.embedder = CachedEmbeddingProvider(
-            container.embedder._inner, InMemoryEmbeddingCache()
-        )
-        dense = DenseRetriever(container.store, container.embedder)
-        sparse = SparseRetriever(container.store, container.sparse_encoder)
-        container.retrieval = RetrievalService(
-            dense=dense,
-            sparse=sparse,
-            hybrid=HybridRetriever(
-                dense, sparse, ReciprocalRankFusion(k=settings.RRF_K)
-            ),
-            reranker=container.reranker,
-            rerank_candidates=settings.RERANK_TOP_N,
-        )
-        container.chat = ChatService(
-            container.retrieval,
-            container.context_builder,
-            container.llm,
-            utility_llm=container.utility_llm,
-            history_turns=settings.CHAT_HISTORY_TURNS,
-            history_tokens=settings.CHAT_HISTORY_MAX_TOKENS,
-            recheck_min_relevance=recheck_threshold(settings, container.reranker),
-            off_topic_below=off_topic_thresholds(settings, container.reranker),
-            corpus=container.store,
-            overview_context_builder=container.overview_context_builder,
-        )
-    return container
+    return Container(
+        settings,
+        tracer=InMemoryTracer(),
+        embedding_cache=InMemoryEmbeddingCache(),
+    )

@@ -100,9 +100,7 @@ class TestPdfParser:
         # "Eliminates" is a column header that appears nowhere in the body
         # text, so it isolates duplication from legitimate overlap -- phrases
         # like "Repeating groups" occur in both the table and the prose.
-        prose = " ".join(
-            b.text for b in pdf_doc.blocks if b.type != BlockType.TABLE
-        )
+        prose = " ".join(b.text for b in pdf_doc.blocks if b.type != BlockType.TABLE)
         assert "Eliminates" not in prose
         assert "Transitive dependency | 2NF" not in prose
 

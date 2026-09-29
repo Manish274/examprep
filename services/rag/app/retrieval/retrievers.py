@@ -10,8 +10,8 @@ import asyncio
 import logging
 from collections.abc import Sequence
 
+from app.core.interfaces import EmbeddingProvider, Reranker
 from app.core.models import RetrievalStrategy, ScoredChunk
-from app.core.registry import dense_retrievers, sparse_retrievers
 from app.observability.trace import span
 from app.retrieval.bm25 import Bm25Encoder
 from app.retrieval.fusion import ReciprocalRankFusion
@@ -27,7 +27,7 @@ class DenseRetriever:
 
     name = "dense"
 
-    def __init__(self, store: QdrantStore, embedder: object) -> None:
+    def __init__(self, store: QdrantStore, embedder: EmbeddingProvider) -> None:
         self._store = store
         self._embedder = embedder
 
@@ -39,7 +39,7 @@ class DenseRetriever:
         document_ids: Sequence[str] | None = None,
         top_k: int = 50,
     ) -> list[ScoredChunk]:
-        vector = await self._embedder.embed_query(query)  # type: ignore[attr-defined]
+        vector = await self._embedder.embed_query(query)
         return await self._store.search_dense(
             vector.values, user_id=user_id, document_ids=document_ids, top_k=top_k
         )
@@ -151,7 +151,7 @@ class RetrievalService:
         dense: DenseRetriever,
         sparse: SparseRetriever,
         hybrid: HybridRetriever,
-        reranker: object | None = None,
+        reranker: Reranker | None = None,
         *,
         rerank_candidates: int = 25,
     ) -> None:
@@ -187,28 +187,24 @@ class RetrievalService:
         # Both hybrid modes share a retrieval stage. The reranked variant
         # pulls a deliberately wider candidate pool, since its job is to pick
         # well from many rather than to trust the fused order.
-        wants_rerank = (
-            strategy is RetrievalStrategy.HYBRID_RERANK and self.reranker is not None
+        reranker = (
+            self.reranker if strategy is RetrievalStrategy.HYBRID_RERANK else None
         )
         candidates = await self.hybrid.search(
             query,
             user_id=user_id,
             document_ids=document_ids,
-            top_k=max(self.rerank_candidates, top_k) if wants_rerank else top_k,
+            top_k=max(self.rerank_candidates, top_k) if reranker else top_k,
             dense_top_k=dense_top_k,
             sparse_top_k=sparse_top_k,
         )
 
-        if not wants_rerank:
+        if reranker is None:
             return candidates
 
         before = {r.chunk.id: position for position, r in enumerate(candidates)}
-        async with span(
-            "rerank", candidates=len(candidates), top_n=top_k
-        ) as observed:
-            reranked = await self.reranker.rerank(  # type: ignore[attr-defined]
-                query, candidates, top_n=top_k
-            )
+        async with span("rerank", candidates=len(candidates), top_n=top_k) as observed:
+            reranked = await reranker.rerank(query, candidates, top_n=top_k)
             # How far the reranker actually moved things. A reranker that
             # changes nothing is costing latency for no benefit, and one that
             # rewrites the order completely is worth a second look -- neither
@@ -232,13 +228,3 @@ class RetrievalService:
                 dropped=len(candidates) - len(reranked),
             )
         return reranked
-
-
-@dense_retrievers.register("qdrant")
-def _create_dense(store: QdrantStore, embedder: object) -> DenseRetriever:
-    return DenseRetriever(store, embedder)
-
-
-@sparse_retrievers.register("qdrant_bm25")
-def _create_sparse(store: QdrantStore, encoder: Bm25Encoder) -> SparseRetriever:
-    return SparseRetriever(store, encoder)

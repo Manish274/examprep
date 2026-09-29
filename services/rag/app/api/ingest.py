@@ -201,9 +201,7 @@ async def delete_document(request: DeleteRequest) -> dict[str, Any]:
     """
     container = get_container()
     before = await container.store.count(user_id=request.user_id)
-    await container.store.delete_document(
-        request.document_id, user_id=request.user_id
-    )
+    await container.store.delete_document(request.document_id, user_id=request.user_id)
     after = await container.store.count(user_id=request.user_id)
 
     logger.info(

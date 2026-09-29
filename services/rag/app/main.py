@@ -35,9 +35,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # deep. httpx stays as configured -- its one line per request is exactly
     # what you want when a provider is misbehaving.
     for noisy in ("httpcore", "hpack", "h11", "urllib3"):
-        logging.getLogger(noisy).setLevel(
-            max(logging.INFO, logging.getLogger().level)
-        )
+        logging.getLogger(noisy).setLevel(max(logging.INFO, logging.getLogger().level))
     logger.info(
         "rag service starting (embedding=%s llm=%s reranker=%s mock=%s)",
         settings.EMBEDDING_PROVIDER,
@@ -56,7 +54,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         reason = (
             "no GEMINI_API_KEY set"
             if not settings.has_gemini_key
-            else "providers not yet switched over"
+            else "a provider is set to mock"
         )
         logger.warning(
             "Running on mock providers (%s). Retrieval and generation "

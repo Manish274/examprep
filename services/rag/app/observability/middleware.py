@@ -20,18 +20,18 @@ from typing import Any
 
 from app.observability.trace import Trace, reset_current_trace, set_current_trace
 
-# Longest prefix wins, so "/generate/test" is not swallowed by "/generate".
+# The routes worth a trace: the ones that run the pipeline. Deleting a
+# document's vectors is left out -- it happens as the visitor is removed, so
+# its trace could belong to nobody and would outlive them.
 _KINDS: tuple[tuple[str, str], ...] = (
     ("/generate/flashcards", "flashcard_generation"),
     ("/generate/test", "test_generation"),
     ("/eval/gold-set", "eval"),
     ("/eval/retrieval", "eval"),
     ("/chat/stream", "chat"),
-    ("/documents/delete", "ingestion"),
     ("/retrieve", "retrieval"),
     ("/ingest", "ingestion"),
     ("/grade", "grading"),
-    ("/chat", "chat"),
 )
 
 
@@ -54,7 +54,7 @@ class TracingMiddleware:
         self.app = app
         self._resolve = resolve_tracer
 
-    async def __call__(self, scope: dict, receive: Any, send: Any) -> None:
+    async def __call__(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
@@ -87,7 +87,7 @@ class TracingMiddleware:
         started_at = datetime.now(timezone.utc)
         started = time.perf_counter()
 
-        async def observed_send(message: dict) -> None:
+        async def observed_send(message: dict[str, Any]) -> None:
             nonlocal status, first_byte_ms
             if message["type"] == "http.response.start":
                 status = message["status"]

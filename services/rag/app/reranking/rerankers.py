@@ -23,11 +23,11 @@ import json
 import logging
 import re
 from collections.abc import Sequence
+from typing import Any
 
 import httpx
 
 from app.core.models import ScoredChunk
-from app.core.registry import rerankers
 from app.embedding.rate_limit import (
     RateLimiter,
     RateLimitError,
@@ -101,8 +101,10 @@ class JinaReranker:
         self._fail_open = fail_open
         self._limiter = RateLimiter(max_rpm)
 
-    async def _call(self, query: str, documents: list[str], top_n: int) -> list[dict]:
-        async def request() -> list[dict]:
+    async def _call(
+        self, query: str, documents: list[str], top_n: int
+    ) -> list[dict[str, Any]]:
+        async def request() -> list[dict[str, Any]]:
             await self._limiter.acquire()
             async with httpx.AsyncClient(timeout=self._timeout) as client:
                 try:
@@ -309,26 +311,3 @@ class GeminiListwiseReranker:
         if not order:
             raise ValueError("ranking contained no usable positions")
         return order
-
-
-@rerankers.register("noop")
-def _create_noop(**_: object) -> NoOpReranker:
-    return NoOpReranker()
-
-
-@rerankers.register("jina")
-def _create_jina(
-    api_key: str,
-    model_id: str = "jina-reranker-v2-base-multilingual",
-    max_rpm: int = 60,
-) -> JinaReranker:
-    return JinaReranker(api_key, model_id=model_id, max_rpm=max_rpm)
-
-
-@rerankers.register("gemini_listwise")
-def _create_gemini_listwise(
-    api_key: str,
-    model_id: str = "gemini-3.5-flash-lite",
-    max_rpm: int = 15,
-) -> GeminiListwiseReranker:
-    return GeminiListwiseReranker(api_key, model_id=model_id, max_rpm=max_rpm)

@@ -9,8 +9,6 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
-from app.core.registry import storages
-
 
 class LocalFilesystemStorage:
     name = "local"
@@ -55,10 +53,3 @@ class LocalFilesystemStorage:
 
     def local_path(self, key: str) -> Path | None:
         return self._resolve(key)
-
-
-@storages.register("local")
-def _create_local_storage(
-    root: Path | str = "./storage/uploads",
-) -> LocalFilesystemStorage:
-    return LocalFilesystemStorage(root)

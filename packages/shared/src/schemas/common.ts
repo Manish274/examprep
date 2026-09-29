@@ -9,3 +9,16 @@ export const uuidSchema = z.string().uuid();
  */
 export const explanationModeSchema = z.enum(["simple", "detailed", "exam"]);
 export type ExplanationMode = z.infer<typeof explanationModeSchema>;
+
+/**
+ * Retrieval strategies the RAG service accepts. The retrieval inspector runs
+ * them side by side; the Python side has the same enum, and a contract test
+ * keeps the two equal.
+ */
+export const retrievalStrategySchema = z.enum([
+  "bm25",
+  "dense",
+  "hybrid",
+  "hybrid_rerank",
+]);
+export type RetrievalStrategy = z.infer<typeof retrievalStrategySchema>;

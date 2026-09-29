@@ -248,9 +248,9 @@ class TestChunkProvenance:
                 ),
             ],
         )
-        chunks = StructuralChunker(
-            counter=HeuristicTokenCounter(), min_tokens=0
-        ).chunk(document)
+        chunks = StructuralChunker(counter=HeuristicTokenCounter(), min_tokens=0).chunk(
+            document
+        )
 
         assert len(chunks) == 1
         assert chunks[0].metadata.source is ContentSource.VISION

@@ -37,3 +37,8 @@ strict = true
 warn_unused_ignores = true
 disallow_untyped_defs = true
 plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+# These publish no type information.
+module = ["asyncpg", "asyncpg.*", "fitz", "snowballstemmer"]
+ignore_missing_imports = true

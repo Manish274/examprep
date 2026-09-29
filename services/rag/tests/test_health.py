@@ -49,9 +49,7 @@ class TestHealth:
         assert isinstance(body["qdrant"], bool)
         assert body["status"] == ("ok" if body["qdrant"] else "degraded")
 
-    async def test_names_the_active_providers(
-        self, client: httpx.AsyncClient
-    ) -> None:
+    async def test_names_the_active_providers(self, client: httpx.AsyncClient) -> None:
         body = (await client.get("/health")).json()
 
         assert set(body["providers"]) == {"embedding", "llm", "reranker", "tracer"}

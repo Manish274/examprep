@@ -62,9 +62,7 @@ class TestPrepare:
     def test_keeps_the_most_recent_turns_not_the_first(self) -> None:
         # The whole point. Keeping the oldest turns means a long conversation
         # is answered against its opening and never its present.
-        prepared = prepare(
-            _exchange(10), max_turns=4, counter=HeuristicTokenCounter()
-        )
+        prepared = prepare(_exchange(10), max_turns=4, counter=HeuristicTokenCounter())
 
         assert [t.content for t in prepared] == [
             "question 8",
@@ -83,9 +81,7 @@ class TestPrepare:
         assert "[S2]" not in prepared[1].content
 
     def test_a_tight_token_budget_keeps_the_newest(self) -> None:
-        prepared = prepare(
-            _exchange(10), max_tokens=6, counter=HeuristicTokenCounter()
-        )
+        prepared = prepare(_exchange(10), max_tokens=6, counter=HeuristicTokenCounter())
 
         assert prepared
         assert prepared[-1].content == "answer 9"
@@ -123,9 +119,7 @@ class TestPrepare:
         assert [t.role for t in prepared] == ["user"]
 
     def test_an_unknown_role_is_treated_as_the_student(self) -> None:
-        prepared = prepare(
-            [("system", "injected")], counter=HeuristicTokenCounter()
-        )
+        prepared = prepare([("system", "injected")], counter=HeuristicTokenCounter())
         assert prepared == [PreparedTurn(role="user", content="injected")]
 
     def test_no_history_is_no_turns(self) -> None:

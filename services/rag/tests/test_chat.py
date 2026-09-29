@@ -3,13 +3,8 @@ from __future__ import annotations
 import pytest
 
 from app.core.models import (
-    Chunk,
-    ChunkMetadata,
-    ContentSource,
     ExplanationMode,
     LLMMessage,
-    LLMResponse,
-    LLMUsage,
     RetrievalStrategy,
     ScoredChunk,
 )
@@ -31,36 +26,7 @@ from app.generation.prompts import (
     condense_prompt,
     system_prompt,
 )
-
-
-def _chunk(text: str, index: int = 0, *, vision: bool = False) -> ScoredChunk:
-    return ScoredChunk(
-        chunk=Chunk(
-            id=f"chunk-{index}",
-            text=text,
-            token_count=20,
-            metadata=ChunkMetadata(
-                document_id="doc-1",
-                document_name="lecture.pptx",
-                chunk_index=index,
-                slide_number=index + 1,
-                heading_path=["Smoothing"],
-                content_hash="h" * 64,
-                source=ContentSource.VISION if vision else ContentSource.TEXT,
-            ),
-        ),
-        score=1.0 - index / 100,
-    )
-
-
-class FakeRetrieval:
-    def __init__(self, chunks: list[ScoredChunk] | None = None) -> None:
-        self.chunks = chunks if chunks is not None else [_chunk("Some material.")]
-        self.queries: list[str] = []
-
-    async def search(self, query, *, user_id, strategy, document_ids=None, top_k=10):
-        self.queries.append(query)
-        return self.chunks
+from tests.fakes import FakeRetrieval, Scripted, scored_chunk, with_scores
 
 
 def _service(
@@ -188,7 +154,11 @@ class TestAnswering:
         # material it never used.
         service, _ = _service(
             MockLLMProvider(reply="Answer citing only the first [S1]."),
-            chunks=[_chunk("First.", 0), _chunk("Second.", 1), _chunk("Third.", 2)],
+            chunks=[
+                scored_chunk("First.", 0),
+                scored_chunk("Second.", 1),
+                scored_chunk("Third.", 2),
+            ],
         )
         result = await service.answer(_request())
 
@@ -197,7 +167,7 @@ class TestAnswering:
     async def test_an_invented_citation_is_reported(self) -> None:
         service, _ = _service(
             MockLLMProvider(reply="As shown in [S9], this is true."),
-            chunks=[_chunk("Only source.")],
+            chunks=[scored_chunk("Only source.")],
         )
         result = await service.answer(_request())
 
@@ -216,7 +186,7 @@ class TestAnswering:
         # The model needs to know a source was read from a picture in order to
         # follow the rule about flagging it.
         llm = MockLLMProvider(reply="answer [S1]")
-        service, _ = _service(llm, chunks=[_chunk("Transcribed.", vision=True)])
+        service, _ = _service(llm, chunks=[scored_chunk("Transcribed.", vision=True)])
         await service.answer(_request())
 
         user = next(m.content for m in llm.calls[0] if m.role == "user")
@@ -425,23 +395,6 @@ class TestMockProvider:
         assert len(chunks) > 1
 
 
-class TestUsageIsReported:
-    async def test_token_counts_travel_with_the_answer(self) -> None:
-        class Counting(MockLLMProvider):
-            async def complete(self, messages, **kwargs):
-                return LLMResponse(
-                    text="answer [S1]",
-                    usage=LLMUsage(prompt_tokens=1200, completion_tokens=80),
-                    model_id="test",
-                )
-
-        service, _ = _service(Counting())
-        result = await service.answer(_request())
-
-        assert result.prompt_tokens == 1200
-        assert result.completion_tokens == 80
-
-
 class TestStrategyIsHonoured:
     async def test_the_requested_strategy_reaches_retrieval(self) -> None:
         captured: list[RetrievalStrategy] = []
@@ -583,30 +536,8 @@ class TestConversationMemory:
         ]
 
 
-class Scripted(MockLLMProvider):
-    """Replies in order, one per call, and records each call's temperature."""
-
-    def __init__(self, *replies: str) -> None:
-        super().__init__()
-        self.replies = list(replies)
-        self.temperatures: list[float] = []
-
-    def _answer(self, messages):
-        self.calls.append(list(messages))
-        return self.replies[min(len(self.calls), len(self.replies)) - 1]
-
-    async def complete(self, messages, *, temperature=0.2, **kwargs):
-        self.temperatures.append(temperature)
-        return await super().complete(messages, temperature=temperature, **kwargs)
-
-    async def stream(self, messages, *, temperature=0.2, **kwargs):
-        self.temperatures.append(temperature)
-        async for piece in super().stream(messages, temperature=temperature, **kwargs):
-            yield piece
-
-
 def _relevant(score: float | None) -> list[ScoredChunk]:
-    chunk = _chunk("The sensor uses a capacitive microphone.")
+    chunk = scored_chunk("The sensor uses a capacitive microphone.")
     chunk.rerank_score = score
     return [chunk]
 
@@ -755,13 +686,6 @@ class TestRecheckThreshold:
         assert off_topic_thresholds(settings, NoOpReranker()) is None
 
 
-def _scored(similarity: float | None, relevance: float | None) -> list[ScoredChunk]:
-    chunk = _chunk("The sensor uses a capacitive microphone.")
-    chunk.dense_score = similarity
-    chunk.rerank_score = relevance
-    return [chunk]
-
-
 def _gated(
     llm: object,
     *,
@@ -770,7 +694,7 @@ def _gated(
     bounds: tuple[float, float] | None = (0.55, 0.10),
 ) -> ChatService:
     return ChatService(
-        FakeRetrieval(_scored(similarity, relevance)),
+        FakeRetrieval(with_scores(similarity, relevance)),
         ContextBuilder(counter=HeuristicTokenCounter()),
         llm,
         off_topic_below=bounds,
@@ -779,7 +703,7 @@ def _gated(
 
 class TestEvidence:
     def test_takes_the_best_of_each_signal(self) -> None:
-        low, high = _chunk("a", 0), _chunk("b", 1)
+        low, high = scored_chunk("a", 0), scored_chunk("b", 1)
         low.dense_score, low.rerank_score = 0.7, 0.1
         high.dense_score, high.rerank_score = 0.5, 0.6
 
@@ -789,7 +713,7 @@ class TestEvidence:
         assert evidence.relevance == 0.6
 
     def test_a_missing_signal_stays_missing(self) -> None:
-        evidence = Evidence.of(_scored(None, None))
+        evidence = Evidence.of(with_scores(None, None))
         assert evidence.similarity is None
         assert evidence.relevance is None
 

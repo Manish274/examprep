@@ -13,9 +13,7 @@ def storage(tmp_path: Path) -> LocalFilesystemStorage:
 
 
 class TestLocalFilesystemStorage:
-    async def test_round_trips_content(
-        self, storage: LocalFilesystemStorage
-    ) -> None:
+    async def test_round_trips_content(self, storage: LocalFilesystemStorage) -> None:
         await storage.write("user-1/doc.pdf", b"%PDF-1.7 content")
         assert await storage.read("user-1/doc.pdf") == b"%PDF-1.7 content"
 
@@ -28,9 +26,7 @@ class TestLocalFilesystemStorage:
     async def test_reports_absence(self, storage: LocalFilesystemStorage) -> None:
         assert not await storage.exists("nothing.pdf")
 
-    async def test_delete_is_idempotent(
-        self, storage: LocalFilesystemStorage
-    ) -> None:
+    async def test_delete_is_idempotent(self, storage: LocalFilesystemStorage) -> None:
         await storage.write("gone.pdf", b"x")
         await storage.delete("gone.pdf")
         # Deleting twice must not raise: a retried job should not fail on a
@@ -38,9 +34,7 @@ class TestLocalFilesystemStorage:
         await storage.delete("gone.pdf")
         assert not await storage.exists("gone.pdf")
 
-    async def test_overwrites_atomically(
-        self, storage: LocalFilesystemStorage
-    ) -> None:
+    async def test_overwrites_atomically(self, storage: LocalFilesystemStorage) -> None:
         await storage.write("doc.pdf", b"first")
         await storage.write("doc.pdf", b"second")
         assert await storage.read("doc.pdf") == b"second"
@@ -80,9 +74,7 @@ class TestKeyValidation:
         with pytest.raises(ValueError):
             storage.local_path(key)
 
-    def test_rejects_backslashes(
-        self, storage: LocalFilesystemStorage
-    ) -> None:
+    def test_rejects_backslashes(self, storage: LocalFilesystemStorage) -> None:
         # On Windows a backslash is a separator, so allowing it would let
         # "..\\.." escape a check written for forward slashes only.
         with pytest.raises(ValueError):

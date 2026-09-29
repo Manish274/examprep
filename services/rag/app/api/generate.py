@@ -1,32 +1,31 @@
 """Generation endpoints for tests, grading and flashcards.
 
-Called by the Node worker, which owns persistence. This service reads the
-indexed chunks, generates, and hands the result back -- it never learns what a
-test or a student is.
+Called by the Node side, which owns persistence: the worker generates, the API
+grades. This service reads the indexed chunks, generates, and hands the result
+back -- it never learns what a test or a student is.
 """
 
 from __future__ import annotations
 
-import logging
-from typing import Annotated, Any
+from typing import Annotated
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from app.api.deps import CorrelationId, InternalAuth, SettingsDep
+from app.api.deps import InternalAuth
 from app.container import get_container
-from app.core.models import QuestionType
+from app.core.models import Chunk, QuestionType
 from app.generation.exams import ExamGenerator
 from app.generation.flashcards import FlashcardGenerator
 from app.generation.grading import GradableAnswer, Grader
 from app.observability.trace import identify, span
 
-logger = logging.getLogger(__name__)
-
 router = APIRouter(tags=["generation"], dependencies=[InternalAuth])
 
 
-async def _load_chunks(user_id: str, document_ids: list[str] | None, limit: int):
+async def _load_chunks(
+    user_id: str, document_ids: list[str] | None, limit: int
+) -> list[Chunk]:
     container = get_container()
     chunks = await container.store.sample_chunks(
         user_id=user_id, document_ids=document_ids, limit=limit
@@ -65,11 +64,7 @@ class GenerateTestResponse(BaseModel):
 
 
 @router.post("/generate/test", response_model=GenerateTestResponse)
-async def generate_test(
-    request: GenerateTestRequest,
-    settings: SettingsDep,
-    correlation_id: CorrelationId = None,
-) -> GenerateTestResponse:
+async def generate_test(request: GenerateTestRequest) -> GenerateTestResponse:
     container = get_container()
     identify(user_id=request.user_id)
     # Sampled wider than the question count so the generator can skip passages
@@ -107,11 +102,6 @@ async def generate_test(
             "short, or contain mostly headings and images.",
         )
 
-    logger.info(
-        "generated %s questions (correlation_id=%s)",
-        len(result.questions),
-        correlation_id,
-    )
     return GenerateTestResponse(
         questions=[
             QuestionResponse(
@@ -148,8 +138,6 @@ class GenerateFlashcardsResponse(BaseModel):
 @router.post("/generate/flashcards", response_model=GenerateFlashcardsResponse)
 async def generate_flashcards(
     request: GenerateFlashcardsRequest,
-    settings: SettingsDep,
-    correlation_id: CorrelationId = None,
 ) -> GenerateFlashcardsResponse:
     container = get_container()
     identify(user_id=request.user_id)
@@ -180,9 +168,7 @@ async def generate_flashcards(
 
     return GenerateFlashcardsResponse(
         cards=[
-            CardResponse(
-                front=c.front, back=c.back, source_chunk_id=c.source_chunk_id
-            )
+            CardResponse(front=c.front, back=c.back, source_chunk_id=c.source_chunk_id)
             for c in result.cards
         ],
         stats=result.as_dict(),
@@ -218,11 +204,7 @@ class GradeResponse(BaseModel):
 
 
 @router.post("/grade", response_model=GradeResponse)
-async def grade(
-    request: GradeRequest,
-    settings: SettingsDep,
-    correlation_id: CorrelationId = None,
-) -> GradeResponse:
+async def grade(request: GradeRequest) -> GradeResponse:
     if not request.answers:
         raise HTTPException(400, "No answers to grade")
 
@@ -271,11 +253,3 @@ async def grade(
         score=round(sum(g.awarded for g in graded), 2),
         max_score=float(len(graded)),
     )
-
-
-@router.get("/generate/config")
-async def generation_config(settings: SettingsDep) -> dict[str, Any]:
-    return {
-        "model": settings.LLM_MODEL,
-        "question_types": [t.value for t in QuestionType],
-    }

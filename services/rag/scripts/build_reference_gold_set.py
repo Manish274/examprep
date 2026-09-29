@@ -30,44 +30,61 @@ from pathlib import Path
 # (question, heading of the section that answers it)
 QUESTIONS: list[tuple[str, str]] = [
     # Deliberately avoids "transitive", the term the passage uses.
-    ("which normal form stops one column depending on another non-key column",
-     "Third Normal Form"),
-    ("what happens to my data if the server loses power halfway through saving",
-     "Write Ahead Logging"),
-    ("why is my query ignoring the index when I filter on the second column",
-     "Composite Indexes"),
-    ("when is it acceptable to store the same fact in two places on purpose",
-     "Denormalization"),
-    ("how do I pick which unique identifier to use for a table",
-     "Keys and Constraints"),
-    ("what stops two people editing the same row from corrupting it",
-     "Locking and Deadlock"),
-    ("which lookup structure cannot answer 'between two values' queries",
-     "Hash Indexes"),
-    ("how does the database decide which way to run my query",
-     "Query Planning"),
-    ("what does it mean for a transaction to be all or nothing",
-     "Transactions and ACID"),
-    ("how can I avoid reading the table at all for a hot query",
-     "Covering Indexes"),
-    ("what goes wrong when a column depends on only part of a composite key",
-     "Second Normal Form"),
-    ("can a table have a value that is itself a list",
-     "First Normal Form"),
-    ("why might splitting a table lose a business rule",
-     "Boyce Codd Normal Form"),
-    ("how do I spread data across several machines",
-     "Sharding"),
-    ("what is the cost of keeping a standby copy perfectly up to date",
-     "Replication"),
-    ("which join method suits two big unsorted tables matched on equality",
-     "Join Algorithms"),
-    ("what reads can I still see that are wrong at the loosest setting",
-     "Isolation Levels"),
-    ("what rule lets me infer one dependency from others",
-     "Functional Dependencies"),
-    ("how many rows and columns does a table have, formally",
-     "Relational Model Basics"),
+    (
+        "which normal form stops one column depending on another non-key column",
+        "Third Normal Form",
+    ),
+    (
+        "what happens to my data if the server loses power halfway through saving",
+        "Write Ahead Logging",
+    ),
+    (
+        "why is my query ignoring the index when I filter on the second column",
+        "Composite Indexes",
+    ),
+    (
+        "when is it acceptable to store the same fact in two places on purpose",
+        "Denormalization",
+    ),
+    (
+        "how do I pick which unique identifier to use for a table",
+        "Keys and Constraints",
+    ),
+    (
+        "what stops two people editing the same row from corrupting it",
+        "Locking and Deadlock",
+    ),
+    (
+        "which lookup structure cannot answer 'between two values' queries",
+        "Hash Indexes",
+    ),
+    ("how does the database decide which way to run my query", "Query Planning"),
+    (
+        "what does it mean for a transaction to be all or nothing",
+        "Transactions and ACID",
+    ),
+    ("how can I avoid reading the table at all for a hot query", "Covering Indexes"),
+    (
+        "what goes wrong when a column depends on only part of a composite key",
+        "Second Normal Form",
+    ),
+    ("can a table have a value that is itself a list", "First Normal Form"),
+    ("why might splitting a table lose a business rule", "Boyce Codd Normal Form"),
+    ("how do I spread data across several machines", "Sharding"),
+    ("what is the cost of keeping a standby copy perfectly up to date", "Replication"),
+    (
+        "which join method suits two big unsorted tables matched on equality",
+        "Join Algorithms",
+    ),
+    (
+        "what reads can I still see that are wrong at the loosest setting",
+        "Isolation Levels",
+    ),
+    ("what rule lets me infer one dependency from others", "Functional Dependencies"),
+    (
+        "how many rows and columns does a table have, formally",
+        "Relational Model Basics",
+    ),
 ]
 
 
@@ -118,9 +135,7 @@ def main() -> int:
 
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(
-        "\n".join(json.dumps(e) for e in entries) + "\n", encoding="utf-8"
-    )
+    out.write_text("\n".join(json.dumps(e) for e in entries) + "\n", encoding="utf-8")
 
     print(f"wrote {len(entries)} gold queries to {out}")
     if missing:

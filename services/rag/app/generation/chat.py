@@ -47,7 +47,9 @@ import time
 from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from typing import Any
 
+from app.core.interfaces import Corpus, LLMProvider, Retrieval
 from app.core.models import (
     Chunk,
     ExplanationMode,
@@ -56,7 +58,7 @@ from app.core.models import (
     ScoredChunk,
     Source,
 )
-from app.generation.context import BuiltContext, verify_citations
+from app.generation.context import BuiltContext, ContextBuilder, verify_citations
 from app.generation.history import needs_context
 from app.generation.history import prepare as prepare_history
 from app.generation.overview import is_overview_question
@@ -102,8 +104,11 @@ class ChatResult:
     retrieved: int = 0
     dangling_citations: list[str] = field(default_factory=list)
     timings: dict[str, int] = field(default_factory=dict)
-    prompt_tokens: int = 0
-    completion_tokens: int = 0
+
+
+# What `ChatService.stream` yields: ("stage", {...}) as the answer moves between
+# phases, ("token", text) as it arrives, and finally ("done", result).
+ChatEvent = tuple[str, str | dict[str, Any] | ChatResult]
 
 
 def is_refusal(text: str) -> bool:
@@ -189,17 +194,17 @@ def _spread_by_document(chunks: Sequence[Chunk], limit: int) -> list[Chunk]:
 class ChatService:
     def __init__(
         self,
-        retrieval: object,
-        context_builder: object,
-        llm: object,
+        retrieval: Retrieval,
+        context_builder: ContextBuilder,
+        llm: LLMProvider,
         *,
-        utility_llm: object | None = None,
+        utility_llm: LLMProvider | None = None,
         history_turns: int = 8,
         history_tokens: int = 1500,
         recheck_min_relevance: float | None = None,
         off_topic_below: tuple[float, float] | None = None,
-        corpus: object | None = None,
-        overview_context_builder: object | None = None,
+        corpus: Corpus | None = None,
+        overview_context_builder: ContextBuilder | None = None,
         overview_scan: int = 400,
     ) -> None:
         self._retrieval = retrieval
@@ -245,8 +250,7 @@ class ChatService:
             return False
         max_similarity, max_relevance = self._off_topic_below
         return (
-            evidence.similarity < max_similarity
-            and evidence.relevance < max_relevance
+            evidence.similarity < max_similarity and evidence.relevance < max_relevance
         )
 
     async def condense(self, request: ChatRequest) -> str:
@@ -263,7 +267,7 @@ class ChatService:
                 return request.question
 
             try:
-                response = await self._utility_llm.complete(  # type: ignore[attr-defined]
+                response = await self._utility_llm.complete(
                     [
                         LLMMessage(
                             role="user",
@@ -311,14 +315,16 @@ class ChatService:
         # it to a search that cannot answer it.
         if self._corpus is not None and is_overview_question(request.question):
             timings["condense_ms"] = 0
-            return await self._gather_whole(request, request.question, timings)
+            return await self._gather_whole(
+                self._corpus, request, request.question, timings
+            )
 
         started = time.perf_counter()
         query = await self.condense(request)
         timings["condense_ms"] = int((time.perf_counter() - started) * 1000)
 
         if self._corpus is not None and is_overview_question(query):
-            return await self._gather_whole(request, query, timings)
+            return await self._gather_whole(self._corpus, request, query, timings)
 
         started = time.perf_counter()
         async with span(
@@ -327,7 +333,7 @@ class ChatService:
             strategy=request.strategy.value,
             top_k=request.top_k,
         ) as observed:
-            chunks: Sequence[ScoredChunk] = await self._retrieval.search(  # type: ignore[attr-defined]
+            chunks = await self._retrieval.search(
                 query,
                 user_id=request.user_id,
                 strategy=request.strategy,
@@ -349,7 +355,7 @@ class ChatService:
         timings["retrieve_ms"] = int((time.perf_counter() - started) * 1000)
 
         async with span("build_context") as observed:
-            context = self._context.build(chunks)  # type: ignore[attr-defined]
+            context = self._context.build(chunks)
             observed.output(
                 sources=len(context.sources),
                 context_tokens=context.token_count,
@@ -360,7 +366,11 @@ class ChatService:
         return context, query, timings, evidence
 
     async def _gather_whole(
-        self, request: ChatRequest, query: str, timings: dict[str, int]
+        self,
+        corpus: Corpus,
+        request: ChatRequest,
+        query: str,
+        timings: dict[str, int],
     ) -> tuple[BuiltContext, str, dict[str, int], Evidence]:
         """Context for a question about the material as a whole: an even
         spread across every document in scope, in reading order."""
@@ -369,7 +379,7 @@ class ChatService:
         async with span(
             "sample_whole", query=query, scan=self._overview_scan
         ) as observed:
-            chunks = await self._corpus.sample_chunks(  # type: ignore[union-attr]
+            chunks = await corpus.sample_chunks(
                 user_id=request.user_id,
                 document_ids=request.document_ids,
                 limit=self._overview_scan,
@@ -377,13 +387,8 @@ class ChatService:
             # Scaffolding -- references, contents, credits -- says nothing
             # about what is examinable. Kept only if it is all there is.
             candidates = usable_chunks(chunks) or list(chunks)
-            chosen = _spread_by_document(
-                candidates,
-                builder.max_chunks,  # type: ignore[attr-defined]
-            )
-            context = builder.build(  # type: ignore[attr-defined]
-                [ScoredChunk(chunk=c, score=0.0) for c in chosen]
-            )
+            chosen = _spread_by_document(candidates, builder.max_chunks)
+            context = builder.build([ScoredChunk(chunk=c, score=0.0) for c in chosen])
             observed.output(
                 scanned=len(chunks),
                 usable=len(candidates),
@@ -486,59 +491,15 @@ class ChatService:
         )
 
     async def answer(self, request: ChatRequest) -> ChatResult:
-        context, query, timings, evidence = await self.gather(request)
+        """The whole answer at once: the streamed path, collected.
 
-        if context.is_empty or self._off_topic(evidence):
-            return self._no_answer(query, timings, evidence)
-
-        started = time.perf_counter()
-        async with span(
-            "generate",
-            mode=request.mode.value,
-            context_tokens=context.token_count,
-            sources=len(context.sources),
-        ) as observed:
-            response = await self._llm.complete(  # type: ignore[attr-defined]
-                self._messages(request, context, overview=evidence.whole_document),
-                temperature=0.2,
-                max_tokens=4000,
-            )
-            prompt_tokens = response.usage.prompt_tokens
-            completion_tokens = response.usage.completion_tokens
-
-            rechecked = False
-            if is_refusal(response.text) and self._worth_rechecking(evidence):
-                rechecked = True
-                response = await self._llm.complete(  # type: ignore[attr-defined]
-                    self._messages(
-                        request,
-                        context,
-                        recheck=True,
-                        overview=evidence.whole_document,
-                    ),
-                    temperature=0.0,
-                    max_tokens=4000,
-                )
-                prompt_tokens += response.usage.prompt_tokens
-                completion_tokens += response.usage.completion_tokens
-
-            timings["generate_ms"] = int((time.perf_counter() - started) * 1000)
-
-            result = self._finish(response.text, context, query, timings)
-            result.prompt_tokens = prompt_tokens
-            result.completion_tokens = completion_tokens
-            observed.output(
-                unsupported=result.unsupported,
-                cited=[s.marker for s in result.sources],
-                dangling=result.dangling_citations,
-                characters=len(result.text),
-                rechecked=rechecked,
-            )
-            observed.meta(
-                prompt_tokens=result.prompt_tokens,
-                completion_tokens=result.completion_tokens,
-            )
-        return result
+        One generation path, not two -- whatever a caller of this sees is what
+        the student saw arrive over the stream.
+        """
+        async for _, value in self.stream(request):
+            if isinstance(value, ChatResult):
+                return value
+        raise RuntimeError("the chat stream ended without a result")
 
     async def _record_generation(
         self,
@@ -571,9 +532,7 @@ class ChatService:
             started_at=started_at,
         )
 
-    async def stream(
-        self, request: ChatRequest
-    ) -> AsyncIterator[tuple[str, object]]:
+    async def stream(self, request: ChatRequest) -> AsyncIterator[ChatEvent]:
         """Yields ("stage", dict) as the answer moves between phases,
         ("token", str) as text arrives, then ("done", ChatResult).
 
@@ -642,12 +601,15 @@ class ChatService:
                 rechecked=rechecked,
             )
             yield "token", UNSUPPORTED_REPLY
-            yield "done", ChatResult(
-                text=UNSUPPORTED_REPLY,
-                unsupported=True,
-                rewritten_query=query,
-                retrieved=timings.get("retrieved", 0),
-                timings=timings,
+            yield (
+                "done",
+                ChatResult(
+                    text=UNSUPPORTED_REPLY,
+                    unsupported=True,
+                    rewritten_query=query,
+                    retrieved=timings.get("retrieved", 0),
+                    timings=timings,
+                ),
             )
             return
 
@@ -676,7 +638,7 @@ class ChatService:
         """
         held: list[str] = []
 
-        async for delta in self._llm.stream(  # type: ignore[attr-defined]
+        async for delta in self._llm.stream(
             messages, temperature=temperature, max_tokens=4000
         ):
             attempt.buffer.append(delta)

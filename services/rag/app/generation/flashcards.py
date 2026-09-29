@@ -13,11 +13,11 @@ thing, and traceability is what makes that checkable.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 
+from app.core.interfaces import LLMProvider
 from app.core.models import Chunk
 from app.generation.study import (
     DEFAULT_BATCH_SIZE,
@@ -96,7 +96,9 @@ class FlashcardGenerationResult:
 
 
 class FlashcardGenerator:
-    def __init__(self, llm: object, *, batch_size: int = DEFAULT_BATCH_SIZE) -> None:
+    def __init__(
+        self, llm: LLMProvider, *, batch_size: int = DEFAULT_BATCH_SIZE
+    ) -> None:
         self._llm = llm
         self._batch_size = batch_size
 
@@ -105,7 +107,6 @@ class FlashcardGenerator:
         chunks: Sequence[Chunk],
         *,
         card_count: int = 20,
-        on_progress: object | None = None,
     ) -> FlashcardGenerationResult:
         result = FlashcardGenerationResult()
 
@@ -144,11 +145,6 @@ class FlashcardGenerator:
                 batch, user, index, result, seen_fronts, used, card_count
             )
 
-            if on_progress is not None:
-                on_progress(len(result.cards), card_count)  # type: ignore[operator]
-
-            await asyncio.sleep(0)
-
         # Models under-deliver: asked for four, they often write two. One more
         # call, over the passages used least, recovers most of the shortfall
         # for a bounded cost -- every call comes out of a small daily quota.
@@ -178,9 +174,6 @@ class FlashcardGenerator:
                 batch, user, len(grouped), result, seen_fronts, used, card_count
             )
 
-            if on_progress is not None:
-                on_progress(len(result.cards), card_count)  # type: ignore[operator]
-
         logger.info("generated flashcards: %s", result.as_dict())
         return result
 
@@ -195,7 +188,7 @@ class FlashcardGenerator:
         card_count: int,
     ) -> None:
         try:
-            response = await self._llm.complete(  # type: ignore[attr-defined]
+            response = await self._llm.complete(
                 messages(_SYSTEM, user),
                 temperature=0.5,
                 max_tokens=8000,

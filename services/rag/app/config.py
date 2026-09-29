@@ -1,4 +1,4 @@
-"""Configuration, validated once at import.
+"""Configuration, read from the repo-root .env and validated once.
 
 Every knob that affects retrieval quality is here rather than scattered through
 the pipeline, so an eval run can describe a variant as a config diff.
@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         # Absolute, so the same file is read no matter where the service
         # is launched from.
-        env_file=(REPO_ROOT / ".env", Path(__file__).resolve().parent / ".env"),
+        env_file=REPO_ROOT / ".env",
         env_file_encoding="utf-8",
         extra="ignore",
         case_sensitive=True,
@@ -33,25 +33,27 @@ class Settings(BaseSettings):
     INTERNAL_SERVICE_TOKEN: str = "dev_internal_token_change_me"
 
     # ── infrastructure ───────────────────────────────────────
-    DATABASE_URL: str = "postgresql://examprep:examprep_dev_password@localhost:5432/examprep"
+    DATABASE_URL: str = (
+        "postgresql://examprep:examprep_dev_password@localhost:5432/examprep"
+    )
     QDRANT_URL: str = "http://localhost:6333"
     QDRANT_API_KEY: str = ""
     QDRANT_COLLECTION: str = "examprep_chunks"
 
     # ── storage ──────────────────────────────────────────────
-    STORAGE_DRIVER: str = "local"
     STORAGE_LOCAL_PATH: Path = Path("./storage/uploads")
 
     # ── providers ────────────────────────────────────────────
-    # Empty GEMINI_API_KEY keeps the whole service on mock providers, so the
-    # pipeline and its tests run with no credentials at all.
+    # The mock providers need no credentials, so the pipeline and its tests
+    # run with no key at all. The model names are the ones a new key can use:
+    # the Gemini 2.5 family answers 404 for them.
     GEMINI_API_KEY: str = ""
     EMBEDDING_PROVIDER: str = "mock"
-    EMBEDDING_MODEL: str = "gemini-embedding-001"
-    EMBEDDING_DIMENSIONS: int = 768
+    EMBEDDING_MODEL: str = "gemini-embedding-2"
+    EMBEDDING_DIMENSIONS: int = 3072
     LLM_PROVIDER: str = "mock"
-    LLM_MODEL: str = "gemini-2.5-flash"
-    LLM_UTILITY_MODEL: str = "gemini-2.5-flash-lite"
+    LLM_MODEL: str = "gemini-3.8-flash"
+    LLM_UTILITY_MODEL: str = "gemini-3.5-flash-lite"
     RERANKER_PROVIDER: str = "noop"
     JINA_API_KEY: str = ""
     RERANKER_MAX_RPM: int = 60
@@ -121,7 +123,7 @@ class Settings(BaseSettings):
     TRACER: str = "postgres"
     LANGFUSE_PUBLIC_KEY: str = ""
     LANGFUSE_SECRET_KEY: str = ""
-    LANGFUSE_HOST: str = "http://localhost:3000"
+    LANGFUSE_HOST: str = "https://cloud.langfuse.com"
 
     @field_validator("STORAGE_LOCAL_PATH")
     @classmethod
@@ -137,12 +139,11 @@ class Settings(BaseSettings):
 
     @property
     def uses_mock_providers(self) -> bool:
-        """Whether any neural stage is still running on a stand-in.
+        """Whether any neural stage is running on a stand-in.
 
         Reports what is actually configured rather than merely whether a key
-        exists. A key can be present while the providers are still set to mock
-        -- during a milestone that has not wired them up yet -- and reporting
-        "real" then would make health output actively misleading.
+        exists: a key can be present while a provider is still set to mock,
+        and reporting "real" then would make health output misleading.
         """
         return "mock" in {self.EMBEDDING_PROVIDER, self.LLM_PROVIDER}
 
@@ -153,9 +154,7 @@ class Settings(BaseSettings):
     @property
     def async_database_url(self) -> str:
         """SQLAlchemy needs the asyncpg driver named explicitly."""
-        return self.DATABASE_URL.replace(
-            "postgresql://", "postgresql+asyncpg://", 1
-        )
+        return self.DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
 
 
 @lru_cache

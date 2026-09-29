@@ -16,7 +16,6 @@ from app.core.models import (
     ChunkMetadata,
     ParsedDocument,
 )
-from app.core.registry import chunkers
 from app.core.text import chunk_id_for, content_hash
 from app.core.tokenizer import TokenCounter, get_token_counter
 
@@ -70,9 +69,7 @@ class FixedWindowChunker:
         window = max(int(self.target_tokens / tokens_per_word), 1)
         stride = max(window - int(self.overlap_tokens / tokens_per_word), 1)
 
-        section = next(
-            (b.text for b in blocks if b.type == BlockType.HEADING), None
-        )
+        section = next((b.text for b in blocks if b.type == BlockType.HEADING), None)
 
         chunks: list[Chunk] = []
         start = 0
@@ -108,13 +105,3 @@ class FixedWindowChunker:
             start += stride
 
         return chunks
-
-
-@chunkers.register("fixed_window")
-def _create_fixed_window_chunker(
-    target_tokens: int = 512,
-    overlap_tokens: int = 64,
-) -> FixedWindowChunker:
-    return FixedWindowChunker(
-        target_tokens=target_tokens, overlap_tokens=overlap_tokens
-    )

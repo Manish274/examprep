@@ -76,9 +76,11 @@ class TestMarkersAndSources:
         assert "slide 7" in context.text
 
     def test_sources_carry_what_the_frontend_renders(self) -> None:
-        [source] = _builder().build(
-            [_scored("A relation is in 3NF.", chunk_id="c-9", page=42)]
-        ).sources
+        [source] = (
+            _builder()
+            .build([_scored("A relation is in 3NF.", chunk_id="c-9", page=42)])
+            .sources
+        )
 
         assert source.chunk_id == "c-9"
         assert source.page_number == 42

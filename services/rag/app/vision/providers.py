@@ -24,7 +24,6 @@ from typing import Protocol
 
 import httpx
 
-from app.core.registry import Registry
 from app.embedding.rate_limit import (
     RateLimiter,
     RateLimitError,
@@ -33,8 +32,6 @@ from app.embedding.rate_limit import (
 )
 
 logger = logging.getLogger(__name__)
-
-vision_providers: Registry[object] = Registry("vision provider")
 
 
 class VisionUnavailableError(Exception):
@@ -45,6 +42,7 @@ class VisionUnavailableError(Exception):
     "this document had no images worth reading", which is actively misleading
     when the images were the point.
     """
+
 
 _PROMPT = """You are reading an image taken from a student's study material.
 
@@ -201,20 +199,3 @@ class GeminiVisionProvider:
         if not text or text.strip().upper().startswith("NO_CONTENT"):
             return None
         return text
-
-
-@vision_providers.register("noop")
-def _create_noop(**_: object) -> NoOpVisionProvider:
-    return NoOpVisionProvider()
-
-
-@vision_providers.register("mock")
-def _create_mock(**_: object) -> MockVisionProvider:
-    return MockVisionProvider()
-
-
-@vision_providers.register("gemini")
-def _create_gemini(
-    api_key: str, model_id: str = "gemini-3.5-flash-lite", max_rpm: int = 15
-) -> GeminiVisionProvider:
-    return GeminiVisionProvider(api_key, model_id=model_id, max_rpm=max_rpm)

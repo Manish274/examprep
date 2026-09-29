@@ -19,7 +19,7 @@ from app.generation.prompts import (
     RECHECK_NOTE,
     system_prompt,
 )
-from tests.test_chat import FakeRetrieval, Scripted, _scored
+from tests.fakes import FakeRetrieval, Scripted, with_scores
 
 
 class TestRecognition:
@@ -107,7 +107,7 @@ def _whole(
 ) -> tuple[ChatService, FakeRetrieval]:
     # By default the search scores what it finds as off topic -- as it did for
     # the starter prompts -- so only the whole-document path can answer.
-    retrieval = FakeRetrieval(_scored(*scores))
+    retrieval = FakeRetrieval(with_scores(*scores))
     service = ChatService(
         retrieval,
         ContextBuilder(counter=HeuristicTokenCounter()),

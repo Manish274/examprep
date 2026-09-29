@@ -26,7 +26,6 @@ from app.core.models import (
     ParsedBlock,
     ParsedDocument,
 )
-from app.core.registry import chunkers
 from app.core.text import chunk_id_for, content_hash, split_sentences
 from app.core.tokenizer import TokenCounter, get_token_counter
 from app.parsing.structure import HeadingStack
@@ -360,8 +359,7 @@ class StructuralChunker:
                         source=(
                             ContentSource.VISION
                             if all(
-                                p.block.source is ContentSource.VISION
-                                for p in pieces
+                                p.block.source is ContentSource.VISION for p in pieces
                             )
                             else ContentSource.TEXT
                         ),
@@ -369,16 +367,3 @@ class StructuralChunker:
                 )
             )
         return chunks
-
-
-@chunkers.register("structural")
-def _create_structural_chunker(
-    target_tokens: int = 512,
-    overlap_tokens: int = 64,
-    min_tokens: int = 64,
-) -> StructuralChunker:
-    return StructuralChunker(
-        target_tokens=target_tokens,
-        overlap_tokens=overlap_tokens,
-        min_tokens=min_tokens,
-    )

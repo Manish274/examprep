@@ -21,11 +21,11 @@ from __future__ import annotations
 import re
 from collections import Counter
 from functools import lru_cache
+from typing import Any
 
 import snowballstemmer
 
 from app.core.models import SparseVector
-from app.core.registry import sparse_encoders
 
 # Words carrying no retrieval signal. Kept short on purpose: an over-eager list
 # removes terms that matter in technical material ("no" in "no partial
@@ -51,7 +51,7 @@ _K1 = 1.5
 
 
 @lru_cache(maxsize=1)
-def _stemmer() -> object:
+def _stemmer() -> Any:
     return snowballstemmer.stemmer("english")
 
 
@@ -77,7 +77,8 @@ def tokenize(text: str) -> list[str]:
     kept = [t for t in raw if t not in _STOPWORDS and len(t) > 1]
     if not kept:
         return []
-    return _stemmer().stemWords(kept)  # type: ignore[attr-defined,no-any-return]
+    stems: list[str] = _stemmer().stemWords(kept)
+    return stems
 
 
 class Bm25Encoder:
@@ -114,11 +115,4 @@ class Bm25Encoder:
         # A query term appearing twice should not double its influence, so the
         # query side is binary presence rather than a count.
         vector = self._weights(text, saturate=False)
-        return SparseVector(
-            indices=vector.indices, values=[1.0 for _ in vector.values]
-        )
-
-
-@sparse_encoders.register("bm25")
-def _create_bm25_encoder(k1: float = _K1) -> Bm25Encoder:
-    return Bm25Encoder(k1=k1)
+        return SparseVector(indices=vector.indices, values=[1.0 for _ in vector.values])

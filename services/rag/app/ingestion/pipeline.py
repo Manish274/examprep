@@ -2,32 +2,33 @@
 
     parse -> chunk -> embed (dense) -> encode (sparse) -> index
 
-Selects a parser by document kind and a chunker by name, both through the
-registry, so a different combination can be evaluated by changing a string
-rather than this code.
+Selects a parser by document kind and a chunker by name, so an evaluation can
+compare chunking strategies by changing a string rather than this code.
 """
 
 from __future__ import annotations
 
 import logging
 import time
-from collections.abc import Callable
 from pathlib import Path
 
 from app.chunking.fixed import FixedWindowChunker
 from app.chunking.structural import StructuralChunker
 from app.config import Settings
+from app.core.interfaces import EmbeddingProvider, SparseEncoder
 from app.core.models import Chunk, DocumentKind, ParsedDocument
 from app.ingestion.vision_enrichment import enrich_with_vision
 from app.observability.trace import span
 from app.parsing.pdf import PyMuPDFParser
 from app.parsing.pptx import PythonPptxParser
+from app.retrieval.qdrant_store import QdrantStore
+from app.vision.providers import VisionProvider
 
 logger = logging.getLogger(__name__)
 
 
 class UnsupportedDocumentError(ValueError):
-    """Raised when no registered parser handles the document kind."""
+    """Raised when no parser handles the document kind."""
 
 
 class EmptyDocumentError(ValueError):
@@ -39,14 +40,16 @@ class EmptyDocumentError(ValueError):
     """
 
 
-def select_parser(kind: DocumentKind):
+def select_parser(kind: DocumentKind) -> PyMuPDFParser | PythonPptxParser:
     for parser in (PyMuPDFParser(), PythonPptxParser()):
         if parser.supports(kind):
             return parser
     raise UnsupportedDocumentError(f"No parser handles {kind.value}")
 
 
-def build_chunker(name: str, settings: Settings):
+def build_chunker(
+    name: str, settings: Settings
+) -> FixedWindowChunker | StructuralChunker:
     if name == "fixed_window":
         return FixedWindowChunker(
             target_tokens=settings.CHUNK_TARGET_TOKENS,
@@ -58,9 +61,7 @@ def build_chunker(name: str, settings: Settings):
             overlap_tokens=settings.CHUNK_OVERLAP_TOKENS,
             min_tokens=settings.CHUNK_MIN_TOKENS,
         )
-    raise ValueError(
-        f"Unknown chunker '{name}'. Available: structural, fixed_window"
-    )
+    raise ValueError(f"Unknown chunker '{name}'. Available: structural, fixed_window")
 
 
 def deduplicate(chunks: list[Chunk]) -> tuple[list[Chunk], list[str]]:
@@ -130,7 +131,7 @@ async def parse_and_chunk(
     kind: DocumentKind,
     settings: Settings,
     chunker_name: str = "structural",
-    vision: object | None = None,
+    vision: VisionProvider | None = None,
 ) -> IngestionResult:
     """Parse, optionally read the images, then chunk."""
     if not path.is_file():
@@ -140,9 +141,7 @@ async def parse_and_chunk(
 
     started = time.perf_counter()
     async with span("parse", filename=filename, kind=kind.value) as observed:
-        document = await parser.parse(
-            path, document_id=document_id, filename=filename
-        )
+        document = await parser.parse(path, document_id=document_id, filename=filename)
         observed.output(
             pages=document.page_count,
             blocks=len(document.blocks),
@@ -185,9 +184,7 @@ async def parse_and_chunk(
             duplicates_dropped=len(duplicates),
             tokens=sum(c.token_count for c in chunks),
             median_tokens=(
-                sorted(c.token_count for c in chunks)[len(chunks) // 2]
-                if chunks
-                else 0
+                sorted(c.token_count for c in chunks)[len(chunks) // 2] if chunks else 0
             ),
         )
     chunk_ms = int((time.perf_counter() - started) * 1000)
@@ -234,10 +231,9 @@ async def embed_and_index(
     result: IngestionResult,
     *,
     user_id: str,
-    embedder: object,
-    sparse_encoder: object,
-    store: object,
-    on_progress: Callable[[int, int], None] | None = None,
+    embedder: EmbeddingProvider,
+    sparse_encoder: SparseEncoder,
+    store: QdrantStore,
 ) -> IngestionResult:
     """Embeds the chunks and writes them to the vector store.
 
@@ -252,7 +248,7 @@ async def embed_and_index(
 
     started = time.perf_counter()
     async with span("embed", chunks=len(texts)) as observed:
-        vectors = await embedder.embed_documents(texts)  # type: ignore[attr-defined]
+        vectors = await embedder.embed_documents(texts)
         observed.output(vectors=len(vectors))
         # Cache hits are the difference between a re-ingest costing a quota
         # day and costing nothing, so they belong in the trace.
@@ -268,20 +264,15 @@ async def embed_and_index(
         )
 
     started = time.perf_counter()
-    sparse = [sparse_encoder.encode_document(text) for text in texts]  # type: ignore[attr-defined]
+    sparse = [sparse_encoder.encode_document(text) for text in texts]
     sparse_ms = int((time.perf_counter() - started) * 1000)
-
-    if on_progress:
-        on_progress(len(chunks), len(chunks))
 
     started = time.perf_counter()
     async with span("index", chunks=len(chunks)) as observed:
         # Replace rather than append: a re-ingest must not leave the previous
         # generation of chunks in the index alongside the new one.
-        await store.delete_document(  # type: ignore[attr-defined]
-            result.document.document_id, user_id=user_id
-        )
-        indexed = await store.upsert_chunks(  # type: ignore[attr-defined]
+        await store.delete_document(result.document.document_id, user_id=user_id)
+        indexed = await store.upsert_chunks(
             chunks,
             [v.values for v in vectors],
             sparse,
@@ -316,10 +307,10 @@ async def ingest_document(
     settings: Settings,
     chunker_name: str = "structural",
     user_id: str | None = None,
-    embedder: object | None = None,
-    sparse_encoder: object | None = None,
-    store: object | None = None,
-    vision: object | None = None,
+    embedder: EmbeddingProvider | None = None,
+    sparse_encoder: SparseEncoder | None = None,
+    store: QdrantStore | None = None,
+    vision: VisionProvider | None = None,
 ) -> IngestionResult:
     """Full pipeline. Stops after chunking when no index target is supplied,
     which is what the preview endpoint and the chunking tests want."""

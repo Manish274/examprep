@@ -97,18 +97,14 @@ class TestJinaReranker:
 
         assert [r.chunk.id for r in result] == ["a", "b"]
 
-    async def test_can_be_configured_to_fail_loudly_instead(
-        self, monkeypatch
-    ) -> None:
+    async def test_can_be_configured_to_fail_loudly_instead(self, monkeypatch) -> None:
         # An evaluation run wants the failure surfaced, not silently absorbed.
         async def boom(self, query, documents, top_n):
             raise RuntimeError("upstream down")
 
         monkeypatch.setattr(JinaReranker, "_call", boom)
         with pytest.raises(RuntimeError):
-            await JinaReranker("key", fail_open=False).rerank(
-                "q", CANDIDATES, top_n=2
-            )
+            await JinaReranker("key", fail_open=False).rerank("q", CANDIDATES, top_n=2)
 
     async def test_ignores_an_out_of_range_index(self, monkeypatch) -> None:
         # A bad index would attach one chunk's score to another's text.
@@ -123,9 +119,7 @@ class TestJinaReranker:
 
         assert [r.chunk.id for r in result] == ["b"]
 
-    async def test_falls_back_when_nothing_usable_comes_back(
-        self, monkeypatch
-    ) -> None:
+    async def test_falls_back_when_nothing_usable_comes_back(self, monkeypatch) -> None:
         async def fake_call(self, query, documents, top_n):
             return []
 

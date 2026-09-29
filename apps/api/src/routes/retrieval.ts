@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { z } from "zod";
+import { retrievalStrategySchema } from "@examprep/shared";
 import { validate } from "../lib/validate.js";
 import { ragRetrieve, type RagRetrievedChunk } from "../lib/rag-client.js";
 import {
@@ -14,7 +15,7 @@ import {
 import type { AppEnv } from "../types.js";
 
 /**
- * Retrieval, exposed to a signed-in user.
+ * Retrieval, exposed to a visitor.
  *
  * The Python service's `/retrieve` is guarded by the internal service token and
  * takes a user id as a plain parameter -- fine between two backends, useless to
@@ -36,7 +37,7 @@ const searchSchema = z.object({
    * says whether fusion or reranking is earning its keep on this material.
    */
   strategies: z
-    .array(z.enum(["bm25", "dense", "hybrid", "hybrid_rerank"]))
+    .array(retrievalStrategySchema)
     .min(1)
     .max(4)
     .default(["hybrid_rerank"]),

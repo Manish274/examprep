@@ -23,7 +23,6 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from app.core.models import ScoredChunk
-from app.core.registry import fusers
 
 DEFAULT_K = 60
 
@@ -80,63 +79,3 @@ class ReciprocalRankFusion:
             ),
         )
         return ordered[:top_k]
-
-
-class WeightedScoreFusion:
-    """Score-based alternative, kept as a comparison point for evaluation.
-
-    Requires min-max normalising each ranking first, which is exactly the
-    fragility RRF avoids -- included so that claim can be measured rather than
-    asserted.
-    """
-
-    name = "weighted"
-
-    def __init__(self, weights: Sequence[float] | None = None) -> None:
-        self.weights = list(weights) if weights else None
-
-    @staticmethod
-    def _normalized(ranking: Sequence[ScoredChunk]) -> dict[str, float]:
-        if not ranking:
-            return {}
-        values = [s.score for s in ranking]
-        low, high = min(values), max(values)
-        spread = high - low
-        if spread == 0:
-            return {s.chunk.id: 1.0 for s in ranking}
-        return {s.chunk.id: (s.score - low) / spread for s in ranking}
-
-    def fuse(
-        self, rankings: Sequence[Sequence[ScoredChunk]], *, top_k: int
-    ) -> list[ScoredChunk]:
-        weights = self.weights or [1.0] * len(rankings)
-        merged: dict[str, ScoredChunk] = {}
-        totals: dict[str, float] = {}
-
-        for ranking, weight in zip(rankings, weights, strict=False):
-            normalized = self._normalized(ranking)
-            for scored in ranking:
-                chunk_id = scored.chunk.id
-                totals[chunk_id] = (
-                    totals.get(chunk_id, 0.0) + weight * normalized[chunk_id]
-                )
-                merged.setdefault(chunk_id, scored.model_copy(deep=True))
-
-        for chunk_id, scored in merged.items():
-            scored.score = totals[chunk_id]
-
-        ordered = sorted(
-            merged.values(),
-            key=lambda s: (-s.score, s.chunk.metadata.chunk_index, s.chunk.id),
-        )
-        return ordered[:top_k]
-
-
-@fusers.register("rrf")
-def _create_rrf(k: int = DEFAULT_K) -> ReciprocalRankFusion:
-    return ReciprocalRankFusion(k=k)
-
-
-@fusers.register("weighted")
-def _create_weighted(weights: Sequence[float] | None = None) -> WeightedScoreFusion:
-    return WeightedScoreFusion(weights=weights)

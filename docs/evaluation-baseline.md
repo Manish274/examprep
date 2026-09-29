@@ -149,8 +149,8 @@ sha256(text))`. The vision pass changed the text of the chunks it enriched, so
 every id changed, and *none* of the 19 gold ids still existed in the index.
 Run against it unmodified, all four strategies would have scored Recall@5 =
 0.000 and the report would have read as a total collapse. The questions were
-fine; only the pointers were stale. `scripts/remap_gold_set.py` repointed all
-19 by matching each entry's recorded section heading, and the eval endpoint now
+fine; only the pointers were stale. A one-off script (since removed) repointed
+all 19 by matching each entry's recorded section heading, and the eval endpoint now
 refuses a gold set whose ids are all absent rather than reporting zeroes.
 
 **The corpus is now both documents**, 40 chunks rather than 20 — the NLP deck

@@ -21,6 +21,7 @@ from typing import Protocol
 
 import asyncpg
 
+from app.core.interfaces import EmbeddingProvider
 from app.core.models import EmbeddingVector
 from app.core.text import content_hash
 
@@ -36,14 +37,16 @@ class EmbeddingCache(Protocol):
         self, model_key: str, dimensions: int, items: dict[str, list[float]]
     ) -> None: ...
 
+    async def close(self) -> None: ...
+
 
 def model_key(model_id: str, dimensions: int) -> str:
     return f"{model_id}@{dimensions}"
 
 
 class InMemoryEmbeddingCache:
-    """Process-local cache. Used by tests and as a fallback when the database
-    is unreachable -- a cache outage must never fail an ingest."""
+    """Process-local cache, for tests: they must not need Postgres, nor fill
+    the shared cache with vectors from throwaway fixtures."""
 
     def __init__(self) -> None:
         self._store: dict[tuple[str, str], list[float]] = {}
@@ -63,6 +66,9 @@ class InMemoryEmbeddingCache:
     ) -> None:
         for h, vector in items.items():
             self._store[(model_key, h)] = vector
+
+    async def close(self) -> None:
+        self._store.clear()
 
 
 class PostgresEmbeddingCache:
@@ -162,12 +168,16 @@ class CachedEmbeddingProvider:
     """
 
     def __init__(
-        self, inner: object, cache: EmbeddingCache, *, query_cache_size: int = 64
+        self,
+        inner: EmbeddingProvider,
+        cache: EmbeddingCache,
+        *,
+        query_cache_size: int = 64,
     ) -> None:
         self._inner = inner
         self._cache = cache
-        self.model_id: str = inner.model_id  # type: ignore[attr-defined]
-        self.dimensions: int = inner.dimensions  # type: ignore[attr-defined]
+        self.model_id = inner.model_id
+        self.dimensions = inner.dimensions
         # Document counters only: ingestion reports these as its cache hits.
         self.hits = 0
         self.misses = 0
@@ -178,9 +188,7 @@ class CachedEmbeddingProvider:
         self.query_hits = 0
         self.query_misses = 0
 
-    async def embed_documents(
-        self, texts: Sequence[str]
-    ) -> list[EmbeddingVector]:
+    async def embed_documents(self, texts: Sequence[str]) -> list[EmbeddingVector]:
         if not texts:
             return []
 
@@ -200,9 +208,7 @@ class CachedEmbeddingProvider:
 
         if pending:
             order = list(pending)
-            fresh = await self._inner.embed_documents(  # type: ignore[attr-defined]
-                [pending[h] for h in order]
-            )
+            fresh = await self._inner.embed_documents([pending[h] for h in order])
             new_vectors = {h: vec.values for h, vec in zip(order, fresh, strict=True)}
             await self._cache.put_many(key, self.dimensions, new_vectors)
             cached.update(new_vectors)
@@ -214,6 +220,9 @@ class CachedEmbeddingProvider:
             for h in hashes
         ]
 
+    async def close(self) -> None:
+        await self._cache.close()
+
     async def embed_query(self, text: str) -> EmbeddingVector:
         key = content_hash(text)
         cached = self._queries.get(key)
@@ -223,7 +232,7 @@ class CachedEmbeddingProvider:
             return cached
 
         self.query_misses += 1
-        vector: EmbeddingVector = await self._inner.embed_query(text)  # type: ignore[attr-defined]
+        vector = await self._inner.embed_query(text)
         if self._query_cache_size > 0:
             self._queries[key] = vector
             while len(self._queries) > self._query_cache_size:
