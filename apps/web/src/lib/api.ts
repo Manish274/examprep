@@ -1,3 +1,4 @@
+import type { DocumentStatus, Source } from "@examprep/shared";
 import { API_URL } from "./config";
 
 /**
@@ -11,8 +12,9 @@ import { API_URL } from "./config";
  * out mid-thought. A 401 refreshes once and retries; concurrent 401s share one
  * refresh rather than racing each other into revoking the token they just got.
  *
- * **Error shape.** The API answers failures as `{error:{code,message}}`. Left
- * to each caller, half of them would surface "[object Object]".
+ * **Error shape.** The API answers failures as `{error:{code,message}}`, with
+ * the specific reason for a validation failure under `details`. Left to each
+ * caller, half of them would surface "[object Object]" or a generic line.
  */
 
 export interface Session {
@@ -109,7 +111,7 @@ async function refreshAccess(): Promise<boolean> {
 
 interface RequestOptions extends Omit<RequestInit, "body"> {
   body?: unknown;
-  /** Skip the bearer token — only sign-in and registration need this. */
+  /** Skip the bearer token: starting and ending a visit carry none. */
   anonymous?: boolean;
 }
 
@@ -152,10 +154,15 @@ export async function request<T>(
   }
 
   if (!response.ok) {
-    const error = (payload as { error?: { code?: string; message?: string } })
-      ?.error;
+    const error = (
+      payload as {
+        error?: { code?: string; message?: string; details?: unknown };
+      } | null
+    )?.error;
     throw new ApiError(
-      error?.message ?? text.slice(0, 300) ?? response.statusText,
+      firstDetail(error?.details) ??
+        error?.message ??
+        (text.slice(0, 300) || response.statusText),
       response.status,
       error?.code ?? "unknown",
     );
@@ -164,7 +171,23 @@ export async function request<T>(
   return payload as T;
 }
 
-// ── auth ───────────────────────────────────────────────────
+/**
+ * The reason a request failed validation, when the API gave one.
+ *
+ * "Request failed validation" tells a student nothing; "Enter your name" is
+ * the line worth showing.
+ */
+function firstDetail(details: unknown): string | undefined {
+  if (!Array.isArray(details)) return undefined;
+  const first: unknown = details[0];
+  if (first && typeof first === "object" && "message" in first) {
+    const { message } = first as { message: unknown };
+    if (typeof message === "string" && message) return message;
+  }
+  return undefined;
+}
+
+// ── visits ─────────────────────────────────────────────────
 
 /** Begins a visit under a name. There are no accounts to sign in to. */
 export const start = (name: string) =>
@@ -197,7 +220,7 @@ export interface DocumentRow {
   filename: string;
   kind: string;
   byteSize: number;
-  status: "pending" | "processing" | "ready" | "failed";
+  status: DocumentStatus;
   pageCount: number | null;
   chunkCount: number | null;
   errorMessage: string | null;
@@ -229,17 +252,9 @@ export interface ChatSessionRow {
   updatedAt: string;
 }
 
-export interface MessageSource {
-  marker: string;
-  chunkId: string;
-  documentName: string;
-  pageNumber: number | null;
-  slideNumber: number | null;
-  headingPath: string[];
-  snippet: string;
-}
+export type MessageSource = Source;
 
-export interface MessageRow {
+interface MessageRow {
   id: string;
   role: "user" | "assistant";
   content: string;
@@ -251,10 +266,11 @@ export interface MessageRow {
 export const listSessions = () =>
   request<{ sessions: ChatSessionRow[] }>("/api/chat/sessions");
 
-export const createSession = (documentId?: string) =>
+/** A new chat over everything uploaded in this visit. */
+export const createSession = () =>
   request<{ session: ChatSessionRow }>("/api/chat/sessions", {
     method: "POST",
-    body: documentId ? { documentId } : {},
+    body: {},
   });
 
 export const loadMessages = (sessionId: string) =>
@@ -262,12 +278,9 @@ export const loadMessages = (sessionId: string) =>
     `/api/chat/sessions/${sessionId}/messages`,
   );
 
-export const deleteSession = (sessionId: string) =>
-  request<void>(`/api/chat/sessions/${sessionId}`, { method: "DELETE" });
-
 // ── quizzes ────────────────────────────────────────────────
 
-export interface TestRow {
+interface TestRow {
   id: string;
   title: string;
   status: "pending" | "generating" | "ready" | "failed";
@@ -297,8 +310,6 @@ export interface GradedResult {
   feedback: string;
 }
 
-export const listTests = () => request<{ tests: TestRow[] }>("/api/tests");
-
 export const createTest = (input: {
   documentId: string;
   questionCount: number;
@@ -327,12 +338,9 @@ export const submitAttempt = (
     { method: "POST", body: { answers } },
   );
 
-export const deleteTest = (id: string) =>
-  request<void>(`/api/tests/${id}`, { method: "DELETE" });
-
 // ── flashcards ─────────────────────────────────────────────
 
-export interface FlashcardSetRow {
+interface FlashcardSetRow {
   id: string;
   title: string;
   status: "pending" | "generating" | "ready" | "failed";
@@ -348,9 +356,6 @@ export interface FlashcardRow {
   position: number;
 }
 
-export const listFlashcardSets = () =>
-  request<{ sets: FlashcardSetRow[] }>("/api/flashcards");
-
 export const createFlashcardSet = (documentId: string, cardCount: number) =>
   request<{ setId: string; title: string }>("/api/flashcards", {
     method: "POST",
@@ -361,6 +366,3 @@ export const loadFlashcardSet = (id: string) =>
   request<{ set: FlashcardSetRow; cards: FlashcardRow[] }>(
     `/api/flashcards/${id}`,
   );
-
-export const deleteFlashcardSet = (id: string) =>
-  request<void>(`/api/flashcards/${id}`, { method: "DELETE" });

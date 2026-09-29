@@ -1,7 +1,8 @@
 "use client";
 
-import { Badge, Button, Card, Display, ProgressRing, QuizOption } from "@/ds";
+import { Badge, Button, Card, ProgressRing, QuizOption } from "@/ds";
 import type { QuizState } from "@/hooks/use-study";
+import { Empty, Failed, Generating } from "./study-states";
 
 /**
  * The quiz surface.
@@ -13,21 +14,6 @@ import type { QuizState } from "@/hooks/use-study";
  */
 
 const LETTERS = ["A", "B", "C", "D", "E", "F"] as const;
-
-const WRITTEN_FIELD: React.CSSProperties = {
-  width: "100%",
-  minHeight: 84,
-  padding: "var(--space-6) var(--space-7)",
-  background: "transparent",
-  border: "1px solid var(--border-subtle)",
-  borderRadius: "var(--radius-lg)",
-  color: "var(--paper-0)",
-  fontFamily: "var(--font-sans)",
-  fontSize: "var(--text-lg)",
-  lineHeight: "var(--text-lg-lh)",
-  resize: "vertical",
-  outline: "none",
-};
 
 export function QuizPanel({
   state,
@@ -51,7 +37,7 @@ export function QuizPanel({
   }
 
   if (state.status === "generating") {
-    return <Generating produced={state.produced} total={state.total} />;
+    return <Generating />;
   }
 
   if (state.status === "failed") {
@@ -133,76 +119,31 @@ export function QuizPanel({
                 paddingLeft: 30,
               }}
             >
-              {question.type === "mcq" && question.options
-                ? question.options.map((option, optionIndex) => {
-                    const value = String(optionIndex);
-                    const selected = chosen === value;
-                    const correct =
-                      graded && result && String(result.correctAnswer) === value;
-                    return (
-                      <QuizOption
-                        key={value}
-                        letter={LETTERS[optionIndex] ?? String(optionIndex + 1)}
-                        disabled={graded}
-                        state={
-                          correct
-                            ? "correct"
-                            : graded && selected
-                              ? "wrong"
-                              : selected
-                                ? "selected"
-                                : "idle"
-                        }
-                        onClick={() => onAnswer(question.id, value)}
-                      >
-                        {option}
-                      </QuizOption>
-                    );
-                  })
-                : null}
-
-              {/* Only multiple choice is generated now, but a paper made before
-                  that change is still openable, so its question types still
-                  render rather than showing an empty prompt. */}
-              {question.type === "true_false"
-                ? (["True", "False"] as const).map((option, optionIndex) => {
-                    const selected = chosen === option;
-                    const correct =
-                      graded &&
-                      result &&
-                      String(result.correctAnswer).toLowerCase() ===
-                        option.toLowerCase();
-                    return (
-                      <QuizOption
-                        key={option}
-                        letter={LETTERS[optionIndex]!}
-                        disabled={graded}
-                        state={
-                          correct
-                            ? "correct"
-                            : graded && selected
-                              ? "wrong"
-                              : selected
-                                ? "selected"
-                                : "idle"
-                        }
-                        onClick={() => onAnswer(question.id, option)}
-                      >
-                        {option}
-                      </QuizOption>
-                    );
-                  })
-                : null}
-
-              {question.type === "short_answer" ? (
-                <textarea
-                  value={chosen ?? ""}
-                  disabled={graded}
-                  placeholder="Answer in your own words"
-                  onChange={(e) => onAnswer(question.id, e.target.value)}
-                  style={WRITTEN_FIELD}
-                />
-              ) : null}
+              {question.options?.map((option, optionIndex) => {
+                const value = String(optionIndex);
+                const selected = chosen === value;
+                const correct =
+                  graded && result && String(result.correctAnswer) === value;
+                return (
+                  <QuizOption
+                    key={value}
+                    letter={LETTERS[optionIndex] ?? String(optionIndex + 1)}
+                    disabled={graded}
+                    state={
+                      correct
+                        ? "correct"
+                        : graded && selected
+                          ? "wrong"
+                          : selected
+                            ? "selected"
+                            : "idle"
+                    }
+                    onClick={() => onAnswer(question.id, value)}
+                  >
+                    {option}
+                  </QuizOption>
+                );
+              })}
 
               {graded && result ? (
                 <div
@@ -219,15 +160,7 @@ export function QuizPanel({
                   <div
                     style={{ display: "flex", alignItems: "center", gap: "var(--space-4)" }}
                   >
-                    <Badge
-                      tone={
-                        result.isCorrect
-                          ? "correct"
-                          : result.awarded > 0
-                            ? "review"
-                            : "wrong"
-                      }
-                    >
+                    <Badge tone={result.isCorrect ? "correct" : "wrong"}>
                       {result.isCorrect ? "Correct" : "Missed"}
                     </Badge>
                   </div>
@@ -331,126 +264,6 @@ function ScoreCard({
         <Button variant="outline" onClick={onReset}>
           New quiz
         </Button>
-      </div>
-    </Card>
-  );
-}
-
-// ── shared states ──────────────────────────────────────────
-
-export function Empty({
-  serif,
-  sans,
-  body,
-}: {
-  serif: string;
-  sans: string;
-  body: string;
-}) {
-  return (
-    <div
-      className="ep-rise"
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        gap: "var(--space-7)",
-        textAlign: "center",
-      }}
-    >
-      <Display size="md" align="center" serif={serif} sans={sans} />
-      <p
-        style={{
-          margin: 0,
-          maxWidth: "var(--reading-max)",
-          fontSize: "var(--text-md)",
-          lineHeight: "var(--text-md-lh)",
-          color: "var(--text-muted)",
-          textWrap: "pretty",
-        }}
-      >
-        {body}
-      </p>
-    </div>
-  );
-}
-
-/**
- * A ring and a word.
- *
- * Generation runs in rate-limited batches, so a count sits at 0 for most of it
- * and reads as a stall. The ring fills once there is real progress to report
- * and turns while there is not.
- */
-export function Generating({
-  produced,
-  total,
-  label = "Generating",
-}: {
-  produced: number;
-  total: number;
-  label?: string;
-}) {
-  const started = produced > 0 && total > 0;
-
-  return (
-    <div
-      className="ep-rise"
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        gap: "var(--space-7)",
-        padding: "var(--space-11) 0",
-      }}
-    >
-      <ProgressRing
-        size={72}
-        indeterminate={!started}
-        value={started ? produced / total : 0}
-      />
-      <span
-        style={{
-          fontSize: "var(--caps-size)",
-          fontWeight: 500,
-          letterSpacing: "var(--caps-track)",
-          textTransform: "uppercase",
-          color: "var(--text-faint)",
-        }}
-      >
-        {label}
-      </span>
-    </div>
-  );
-}
-
-export function Failed({
-  message,
-  onReset,
-}: {
-  message: string | null;
-  onReset: () => void;
-}) {
-  return (
-    <Card padding="var(--space-10)">
-      <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-6)" }}>
-        <Badge tone="wrong">Did not finish</Badge>
-        <p
-          style={{
-            margin: 0,
-            fontSize: "var(--text-md)",
-            lineHeight: "var(--text-md-lh)",
-            color: "var(--text-body)",
-          }}
-        >
-          {message ??
-            "Generation did not complete. Nothing is wrong with your document."}
-        </p>
-        <div>
-          <Button variant="outline" onClick={onReset}>
-            Try again
-          </Button>
-        </div>
       </div>
     </Card>
   );

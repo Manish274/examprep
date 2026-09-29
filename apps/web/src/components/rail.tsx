@@ -1,17 +1,11 @@
 "use client";
 
-import {
-  Layers,
-  LogOut,
-  MessageCircle,
-  PanelLeft,
-  Plus,
-  Search,
-  Target,
-} from "lucide-react";
+import { Layers, LogOut, MessageCircle, PanelLeft, Plus, Target } from "lucide-react";
 import { IconButton, NavItem, RailSection, Wordmark } from "@/ds";
 import type { ChatSessionRow } from "@/lib/api";
-import type { StudyMode } from "./modes";
+
+/** The three sections of the workspace. The rail is the only place to switch. */
+export type StudyMode = "chat" | "quiz" | "cards";
 
 /**
  * The left rail: wordmark, the three destinations, a new-chat action beneath
@@ -94,19 +88,16 @@ export function Rail({
           }}
         >
           <Wordmark />
-          <div style={{ display: "flex", gap: 2 }}>
-            <IconButton icon={Search} label="Search chats" size={28} />
-            <IconButton
-              icon={PanelLeft}
-              label="Hide sidebar"
-              size={28}
-              onClick={onToggle}
-            />
-          </div>
+          <IconButton
+            icon={PanelLeft}
+            label="Hide sidebar"
+            size={28}
+            onClick={onToggle}
+          />
         </div>
 
-        {/* The three sections. Switching happens here and nowhere else, which
-            is what lets the composer stay a text field and an attach button. */}
+        {/* Switching happens here and nowhere else, which is what lets the
+            composer stay a text field and an attach button. */}
         <RailSection title="Study">
           <NavItem
             icon={MessageCircle}

@@ -5,9 +5,8 @@ import { Answer, Sources } from "./answer";
 import type { ChatStage, Turn } from "@/hooks/use-chat";
 
 /**
- * What the wait is, said plainly. Most of it comes before the first word:
- * the question is rewritten, searched for and ranked, and until now the
- * student saw the same line for all of it.
+ * What the wait is, said plainly. Most of it comes before the first word,
+ * while the question is rewritten, searched for and ranked.
  */
 function stageLabel(stage: ChatStage | undefined, passages?: number): string {
   if (stage === "writing") {
@@ -29,11 +28,9 @@ function stageLabel(stage: ChatStage | undefined, passages?: number): string {
  */
 export function ChatThread({
   turns,
-  streaming,
   error,
 }: {
   turns: Turn[];
-  streaming: boolean;
   error: string | null;
 }) {
   if (turns.length === 0 && !error) return null;
@@ -86,8 +83,6 @@ export function ChatThread({
           {error}
         </p>
       ) : null}
-
-      {streaming ? null : null}
     </div>
   );
 }

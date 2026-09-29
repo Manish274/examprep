@@ -10,7 +10,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { Button, Flashcard, Icon, usePrefersReducedMotion } from "@/ds";
-import { Empty, Failed, Generating } from "./quiz-panel";
+import { Empty, Failed, Generating } from "./study-states";
 import type { CardsState } from "@/hooks/use-study";
 
 /**
@@ -125,7 +125,7 @@ export function CardsPanel({
   }
 
   if (state.status === "generating") {
-    return <Generating produced={state.produced} total={state.total} />;
+    return <Generating />;
   }
 
   if (state.status === "failed") {
@@ -152,7 +152,7 @@ export function CardsPanel({
   // Fewer cards than asked for is a result, not an error: the generator will
   // not invent cards the material cannot support. Said plainly, so a short set
   // does not read as a bug.
-  const shortBy = state.total > total ? state.total - total : 0;
+  const shortBy = state.requested > total ? state.requested - total : 0;
 
   return (
     <>
@@ -194,7 +194,7 @@ export function CardsPanel({
               color: "var(--text-muted)",
             }}
           >
-            {total} of the {state.total} cards you asked for. The rest would have
+            {total} of the {state.requested} cards you asked for. The rest would have
             needed material this document does not contain.
           </p>
         ) : null}
@@ -204,7 +204,6 @@ export function CardsPanel({
             question={card.front}
             answer={card.back}
             hint="Click to study"
-            printed
             onActivate={() => setStudying(true)}
             flipped={false}
           />
@@ -234,15 +233,9 @@ export function CardsPanel({
             Study
           </Button>
           <span style={{ flex: 1 }} />
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              setIndex(0);
-              setFlipped(false);
-              onReset();
-            }}
-          >
+          {/* The page keys this panel by set, so resetting replaces it and
+              the position and flip start over with the next deck. */}
+          <Button variant="outline" size="sm" onClick={onReset}>
             New set
           </Button>
         </div>
@@ -309,7 +302,6 @@ export function CardsPanel({
                     question={card.front}
                     answer={card.back}
                     height={340}
-                    printed
                     flipped={flipped}
                     onFlip={setFlipped}
                   />

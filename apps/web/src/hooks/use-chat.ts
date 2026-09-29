@@ -1,9 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { ExplanationMode } from "@examprep/shared";
 import {
   createSession,
-  deleteSession,
   listSessions,
   loadMessages,
   type ChatSessionRow,
@@ -35,8 +35,6 @@ export interface Turn {
 }
 
 export type ChatStage = "searching" | "writing" | "rechecking";
-
-export type ChatMode = "simple" | "detailed" | "exam";
 
 export function useChat() {
   const { send, ready } = useSocket();
@@ -92,34 +90,22 @@ export function useChat() {
     setError(null);
   }, []);
 
-  const removeSession = useCallback(
-    async (id: string) => {
-      try {
-        await deleteSession(id);
-        setSessions((rows) => rows.filter((row) => row.id !== id));
-        if (sessionId === id) startNew();
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Could not delete that chat");
-      }
-    },
-    [sessionId, startNew],
-  );
-
   const ask = useCallback(
-    async (content: string, mode: ChatMode, documentId?: string) => {
+    async (content: string, mode: ExplanationMode) => {
       if (!content.trim() || streaming) return;
       setError(null);
 
       let id = sessionId;
       if (!id) {
         try {
-          const { session } = await createSession(documentId);
+          // Over everything uploaded in this visit, including anything added
+          // after the chat began.
+          const { session } = await createSession();
           id = session.id;
           setSessionId(id);
           // Not added to the list here: it has no title until the question is
           // persisted, and an untitled row is exactly what the rail filters
           // out. `chat:start` refreshes it a moment later, named.
-
         } catch (err) {
           setError(err instanceof Error ? err.message : "Could not start a chat");
           return;
@@ -149,10 +135,6 @@ export function useChat() {
     },
     [send, sessionId, streaming],
   );
-
-  const cancel = useCallback(() => {
-    if (sessionId && streaming) send({ type: "cancel", sessionId });
-  }, [send, sessionId, streaming]);
 
   useSocketEvent((event) => {
     switch (event.type) {
@@ -205,7 +187,7 @@ export function useChat() {
         setTurns((rows) =>
           rows.map((row) =>
             row.id === event.messageId
-              ? { ...row, sources: event.sources as unknown as MessageSource[] }
+              ? { ...row, sources: event.sources }
               : row,
           ),
         );
@@ -249,9 +231,7 @@ export function useChat() {
     error,
     connected: ready,
     ask,
-    cancel,
     open,
     startNew,
-    removeSession,
   };
 }

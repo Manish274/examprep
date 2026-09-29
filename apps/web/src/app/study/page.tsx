@@ -10,14 +10,15 @@ import {
   IconButton,
   SuggestionChip,
 } from "@/ds";
+import type { ExplanationMode } from "@examprep/shared";
 import { Backdrop } from "@/components/backdrop";
-import { Rail } from "@/components/rail";
+import { Rail, type StudyMode } from "@/components/rail";
 import { ChatThread } from "@/components/chat-thread";
 import { QuizPanel } from "@/components/quiz-panel";
 import { CardsPanel } from "@/components/cards-panel";
-import { MODE_PLACEHOLDER, type StudyMode } from "@/components/modes";
+import { StudySetup } from "@/components/study-setup";
 import { useAuth } from "@/lib/auth";
-import { useChat, type ChatMode } from "@/hooks/use-chat";
+import { useChat } from "@/hooks/use-chat";
 import { useDocuments, describeDocument } from "@/hooks/use-documents";
 import { useStudy } from "@/hooks/use-study";
 
@@ -41,6 +42,12 @@ const STARTERS = [
   { icon: Sparkles, text: "Summarise what I uploaded" },
 ] as const;
 
+/**
+ * How answers are written. The service also knows "simple" and "exam"; the
+ * workspace has no control for them yet, so every question asks for this.
+ */
+const EXPLANATION: ExplanationMode = "detailed";
+
 function greeting(hour: number): string {
   if (hour < 12) return "Morning";
   if (hour < 18) return "Afternoon";
@@ -54,7 +61,6 @@ export default function StudyPage() {
   const [railOpen, setRailOpen] = useState(true);
   const [mode, setMode] = useState<StudyMode>("chat");
   const [draft, setDraft] = useState("");
-  const [explanation] = useState<ChatMode>("detailed");
   const fileInput = useRef<HTMLInputElement>(null);
   const bottom = useRef<HTMLDivElement>(null);
 
@@ -100,8 +106,6 @@ export default function StudyPage() {
   const showComposer =
     mode === "chat" || studyStatus === "idle" || studyStatus === "failed";
 
-  const firstReady = docs.ready[0]?.id;
-
   if (!loaded || !session) return null;
 
   async function onPickFile(event: React.ChangeEvent<HTMLInputElement>) {
@@ -115,7 +119,7 @@ export default function StudyPage() {
     const text = draft.trim();
     if (!text) return;
     setDraft("");
-    void chat.ask(text, explanation, firstReady);
+    void chat.ask(text, EXPLANATION);
   }
 
   const composer = (
@@ -124,35 +128,31 @@ export default function StudyPage() {
       onChange={setDraft}
       onSubmit={onSubmit}
       onAttach={() => fileInput.current?.click()}
-      placeholder={MODE_PLACEHOLDER[mode]}
       disabled={chat.streaming}
-      hideSend={mode !== "chat"}
       attachments={
-        docs.documents.length > 0 ? (
-          <>
-            {docs.documents.slice(0, 4).map((document) => (
+        docs.documents.length > 0
+          ? docs.documents.map((document) => (
               <AttachmentTile
                 key={document.id}
                 name={document.filename}
                 meta={describeDocument(document)}
-                progress={document.status === "ready" ? 100 : (document.progress ?? 0)}
-                failed={document.status === "failed"}
+                status={
+                  document.status === "ready" || document.status === "failed"
+                    ? document.status
+                    : "working"
+                }
+                progress={document.progress}
                 onRemove={() => void docs.remove(document.id)}
               />
-            ))}
-          </>
-        ) : null
+            ))
+          : null
       }
       body={
         mode === "chat" ? undefined : (
           <StudySetup
             mode={mode}
             documents={docs.ready}
-            busy={
-              mode === "quiz"
-                ? study.quiz.status === "generating"
-                : study.cards.status === "generating"
-            }
+            busy={studyStatus === "generating"}
             onGenerate={(documentId, count, difficulty) =>
               mode === "quiz"
                 ? void study.generateQuiz(documentId, count, difficulty)
@@ -381,11 +381,7 @@ export default function StudyPage() {
                 }}
               >
                 {mode === "chat" ? (
-                  <ChatThread
-                    turns={chat.turns}
-                    streaming={chat.streaming}
-                    error={chat.error}
-                  />
+                  <ChatThread turns={chat.turns} error={chat.error} />
                 ) : null}
 
                 {mode === "quiz" ? (
@@ -399,10 +395,10 @@ export default function StudyPage() {
 
                 {mode === "cards" ? (
                   <CardsPanel
-                  key={study.cards.setId ?? "new"}
-                  state={study.cards}
-                  onReset={study.resetCards}
-                />
+                    key={study.cards.setId ?? "new"}
+                    state={study.cards}
+                    onReset={study.resetCards}
+                  />
                 ) : null}
 
                 <div ref={bottom} />
@@ -436,128 +432,6 @@ export default function StudyPage() {
           </>
         )}
       </main>
-    </div>
-  );
-}
-
-// ── quiz / cards setup, inside the composer shell ──────────
-
-const SELECT: React.CSSProperties = {
-  height: 32,
-  padding: "0 10px",
-  background: "var(--surface-card)",
-  border: "1px solid var(--border-subtle)",
-  borderRadius: "var(--radius-md)",
-  color: "var(--paper-0)",
-  fontFamily: "var(--font-sans)",
-  fontSize: "var(--text-sm)",
-  outline: "none",
-  maxWidth: 220,
-};
-
-function StudySetup({
-  mode,
-  documents,
-  busy,
-  onGenerate,
-}: {
-  mode: StudyMode;
-  documents: { id: string; filename: string }[];
-  busy: boolean;
-  onGenerate: (documentId: string, count: number, difficulty: string) => void;
-}) {
-  const [documentId, setDocumentId] = useState("");
-  const [count, setCount] = useState(mode === "quiz" ? 5 : 8);
-  const [difficulty, setDifficulty] = useState("mixed");
-
-  const chosen = documentId || documents[0]?.id || "";
-
-  if (documents.length === 0) {
-    return (
-      <p
-        style={{
-          margin: "2px 2px 14px",
-          fontSize: "var(--text-md)",
-          color: "var(--text-muted)",
-        }}
-      >
-        Add a document with the + first — {mode === "quiz" ? "questions" : "cards"}{" "}
-        are generated from your own material, so there is nothing to work from yet.
-      </p>
-    );
-  }
-
-  return (
-    <div
-      style={{
-        display: "flex",
-        flexWrap: "wrap",
-        alignItems: "center",
-        gap: "var(--space-5)",
-        padding: "2px 2px 14px",
-      }}
-    >
-      <select
-        value={chosen}
-        onChange={(e) => setDocumentId(e.target.value)}
-        style={SELECT}
-        aria-label="Document"
-      >
-        {documents.map((document) => (
-          <option key={document.id} value={document.id}>
-            {document.filename}
-          </option>
-        ))}
-      </select>
-
-      <select
-        value={count}
-        onChange={(e) => setCount(Number(e.target.value))}
-        style={{ ...SELECT, maxWidth: 130 }}
-        aria-label={mode === "quiz" ? "Questions" : "Cards"}
-      >
-        {[3, 5, 8, 10, 15].map((n) => (
-          <option key={n} value={n}>
-            {n} {mode === "quiz" ? "questions" : "cards"}
-          </option>
-        ))}
-      </select>
-
-      {mode === "quiz" ? (
-        <select
-          value={difficulty}
-          onChange={(e) => setDifficulty(e.target.value)}
-          style={{ ...SELECT, maxWidth: 120 }}
-          aria-label="Difficulty"
-        >
-          <option value="mixed">Mixed</option>
-          <option value="easy">Easy</option>
-          <option value="hard">Hard</option>
-        </select>
-      ) : null}
-
-      <button
-        type="button"
-        disabled={busy || !chosen}
-        onClick={() => onGenerate(chosen, count, difficulty)}
-        style={{
-          height: 32,
-          padding: "0 16px",
-          borderRadius: "var(--radius-pill)",
-          border: "1px solid var(--accent)",
-          background: "var(--accent)",
-          color: "#0A0A0B",
-          fontFamily: "var(--font-sans)",
-          fontSize: "var(--text-sm)",
-          fontWeight: 500,
-          letterSpacing: "var(--track-wide)",
-          cursor: busy ? "not-allowed" : "pointer",
-          opacity: busy ? 0.38 : 1,
-          transition: "background var(--dur-fast) var(--ease-standard)",
-        }}
-      >
-        {busy ? "Generating" : mode === "quiz" ? "Quiz me" : "Make cards"}
-      </button>
     </div>
   );
 }

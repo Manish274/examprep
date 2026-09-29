@@ -17,15 +17,14 @@ import { useSocket, useSocketEvent } from "@/lib/socket";
  * document just as much as a question does.
  *
  * Progress arrives over the WebSocket rather than by polling. The API returns
- * from the upload as soon as the bytes are stored -- parsing a deck takes
- * minutes under free-tier rate limits -- so the percentage here is the worker
- * reporting on itself, and it is the only honest thing to show.
+ * from the upload as soon as the bytes are stored -- processing a deck takes
+ * minutes under free-tier rate limits -- so what is shown here is the worker
+ * reporting on itself: a percentage only once there is one to report.
  */
 
 export interface DocumentState extends DocumentRow {
-  /** 0-100 while indexing, from the worker. Undefined once ready. */
+  /** 0-100 through the measurable part of processing, from the worker. */
   progress?: number;
-  stage?: string;
 }
 
 export function useDocuments() {
@@ -39,16 +38,14 @@ export function useDocuments() {
     try {
       const { documents: rows } = await listDocuments();
       setDocuments((previous) => {
-        const progressById = new Map(
-          previous.map((d) => [d.id, { progress: d.progress, stage: d.stage }]),
-        );
+        const progressById = new Map(previous.map((d) => [d.id, d.progress]));
         return rows.map((row) => ({
           ...row,
           // Keep any in-flight percentage: the list endpoint knows the status
           // but not how far through the worker is.
           ...(row.status === "ready" || row.status === "failed"
             ? {}
-            : (progressById.get(row.id) ?? {})),
+            : { progress: progressById.get(row.id) }),
         }));
       });
       setError(null);
@@ -88,7 +85,7 @@ export function useDocuments() {
     setDocuments((rows) =>
       rows.map((row) =>
         row.id === documentId
-          ? { ...row, progress: progress.percent, stage: progress.stage }
+          ? { ...row, progress: progress.percent }
           : row,
       ),
     );
@@ -106,8 +103,8 @@ export function useDocuments() {
       setError(null);
       try {
         const { documentId } = await uploadDocument(file);
-        // Shown immediately at 0%: the real row arrives on the next refresh,
-        // and a file that vanishes for a second after being chosen reads as a
+        // Shown immediately: the real row arrives on the next refresh, and a
+        // file that vanishes for a second after being chosen reads as a
         // failure.
         setDocuments((rows) => [
           {
@@ -115,13 +112,11 @@ export function useDocuments() {
             filename: file.name,
             kind: file.name.split(".").pop() ?? "pdf",
             byteSize: file.size,
-            status: "pending",
+            status: "queued",
             pageCount: null,
             chunkCount: null,
             errorMessage: null,
             createdAt: new Date().toISOString(),
-            progress: 0,
-            stage: "queued",
           },
           ...rows,
         ]);
@@ -151,14 +146,10 @@ export function useDocuments() {
   return {
     documents,
     ready: documents.filter((d) => d.status === "ready"),
-    working: documents.filter(
-      (d) => d.status !== "ready" && d.status !== "failed",
-    ),
     loading,
     error,
     upload,
     remove,
-    refresh,
   };
 }
 

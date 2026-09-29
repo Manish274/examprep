@@ -18,7 +18,7 @@ import { useSocket, useSocketEvent } from "@/lib/socket";
  * Quiz and flashcard generation.
  *
  * Both are background jobs -- several rate-limited model calls each -- so the
- * request returns a id and the work reports itself over the WebSocket. The two
+ * request returns an id and the work reports itself over the WebSocket. The two
  * share one hook because they share that lifecycle exactly; only the payload
  * at the end differs.
  */
@@ -36,8 +36,6 @@ export interface QuizState {
   score: number | null;
   maxScore: number | null;
   message: string | null;
-  produced: number;
-  total: number;
 }
 
 export interface CardsState {
@@ -46,8 +44,8 @@ export interface CardsState {
   title: string;
   cards: FlashcardRow[];
   message: string | null;
-  produced: number;
-  total: number;
+  /** How many cards were asked for; the set may come back shorter. */
+  requested: number;
 }
 
 const EMPTY_QUIZ: QuizState = {
@@ -61,8 +59,6 @@ const EMPTY_QUIZ: QuizState = {
   score: null,
   maxScore: null,
   message: null,
-  produced: 0,
-  total: 0,
 };
 
 const EMPTY_CARDS: CardsState = {
@@ -71,8 +67,7 @@ const EMPTY_CARDS: CardsState = {
   title: "",
   cards: [],
   message: null,
-  produced: 0,
-  total: 0,
+  requested: 0,
 };
 
 export function useStudy() {
@@ -87,7 +82,7 @@ export function useStudy() {
   const generateQuiz = useCallback(
     async (documentId: string, questionCount: number, difficulty: string) => {
       quizId.current = null;
-      setQuiz({ ...EMPTY_QUIZ, status: "generating", total: questionCount });
+      setQuiz({ ...EMPTY_QUIZ, status: "generating" });
       try {
         const { testId, title } = await createTest({
           documentId,
@@ -116,7 +111,7 @@ export function useStudy() {
   const generateCards = useCallback(
     async (documentId: string, cardCount: number) => {
       cardsId.current = null;
-      setCards({ ...EMPTY_CARDS, status: "generating", total: cardCount });
+      setCards({ ...EMPTY_CARDS, status: "generating", requested: cardCount });
       try {
         const { setId, title } = await createFlashcardSet(documentId, cardCount);
         cardsId.current = setId;
@@ -135,7 +130,7 @@ export function useStudy() {
 
   useSocketEvent((event) => {
     if (event.type !== "generation:progress") return;
-    const { targetId, kind, status, produced, total, message } = event;
+    const { targetId, kind, status, message } = event;
 
     // Compared against a ref rather than inside the state updater: React may
     // call an updater twice, and fetching the finished paper twice would open
@@ -145,17 +140,15 @@ export function useStudy() {
     if (!owned) return;
 
     const patch = {
-      produced,
-      total: total || undefined,
       message: message ?? null,
-      ...(status === "failed" ? { status: "failed" as StudyStatus } : {}),
+      ...(status === "failed" ? { status: "failed" as const } : {}),
     };
 
     if (kind === "test") {
-      setQuiz((state) => ({ ...state, ...patch, total: patch.total ?? state.total }));
+      setQuiz((state) => ({ ...state, ...patch }));
       if (status === "ready") void openQuiz(targetId);
     } else {
-      setCards((state) => ({ ...state, ...patch, total: patch.total ?? state.total }));
+      setCards((state) => ({ ...state, ...patch }));
       if (status === "ready") void openCards(targetId);
     }
   });

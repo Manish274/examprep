@@ -1,7 +1,5 @@
-@import "tailwindcss";
-
 /* The design system, verbatim from the Claude Design project
-   examprep-design-system-87316d25. Token values are not edited here — change
+   examprep-design-system-87316d25. Token values are not edited here -- change
    them in the design project and re-import. */
 @import "../styles/ds/tokens/colors.css";
 @import "../styles/ds/tokens/typography.css";
@@ -10,6 +8,26 @@
 @import "../styles/ds/tokens/elevation.css";
 @import "../styles/ds/tokens/motion.css";
 @import "../styles/ds/tokens/base.css";
+
+/* The browser defaults the components assume are gone. Every component sets
+   its own spacing, borders and type inline, so they start from nothing. In a
+   layer, so any unlayered rule -- the tokens' base.css included -- wins. */
+@layer reset {
+  *, *::before, *::after { margin: 0; padding: 0; border: 0 solid; }
+  html { -webkit-text-size-adjust: 100%; -webkit-tap-highlight-color: transparent; }
+  h1, h2, h3, h4, h5, h6 { font-size: inherit; font-weight: inherit; }
+  ol, ul { list-style: none; }
+  svg, video { display: block; vertical-align: middle; }
+  button, input, select, textarea {
+    font: inherit;
+    letter-spacing: inherit;
+    color: inherit;
+    background-color: transparent;
+    border-radius: 0;
+  }
+  ::placeholder { opacity: 1; }
+  [hidden] { display: none !important; }
+}
 
 /* Examprep is dark-only by design. Declaring it stops the browser painting a
    white canvas behind the page during load and in form controls. */
@@ -22,32 +40,9 @@
 }
 .ep-rise { animation: epRise var(--dur-reveal) var(--ease-out) both; }
 
-@media (prefers-reduced-motion: reduce) {
-  .ep-rise { animation: none; }
-  /* Looping animations are stopped outright. Shortening them to 1ms, as the
-     rule below does for everything else, would leave them cycling once a
-     millisecond -- a flicker at the frame rate rather than stillness. */
-  .ep-spin, .ep-pulse { animation: none !important; }
-  .ep-pulse { opacity: .6; }
-  /* The light still follows the pointer -- it is position, not motion -- but
-     the press no longer shrinks the button or sends out a ring. */
-  .ep-glow:active { transform: none; }
-  .ep-ripple { display: none; }
-  *, *::before, *::after {
-    animation-duration: 1ms !important;
-    transition-duration: 1ms !important;
-  }
-}
-
 /* The landing nav collapses below 860px, as the source design specified. */
 .ep-landing-nav { display: none; }
 @media (min-width: 860px) { .ep-landing-nav { display: flex; } }
-
-/* The one looping animation in the product: the indeterminate progress ring.
-   Stopped entirely by the reduced-motion block above, which leaves a static
-   arc rather than nothing. */
-@keyframes epSpin { to { transform: rotate(360deg); } }
-.ep-spin { animation: epSpin 1.1s linear infinite; transform-origin: 50% 50%; }
 
 /* Flashcards move as a deck. The card you leave slides out toward the button
    you pressed and the next one arrives from the opposite edge, so the deck has
@@ -132,18 +127,18 @@
   border-radius: 999px;
   background: radial-gradient(circle, rgba(255, 255, 255, .22), transparent 62%);
   pointer-events: none;
-  animation: epRipple 520ms /* RIPPLE_MS in ds/index.tsx */ var(--ease-out) both;
+  animation: epRipple 520ms /* RIPPLE_MS in ds/rail.tsx */ var(--ease-out) both;
 }
 
 /* The dim behind a card being studied. */
 @keyframes epFade { from { opacity: 0; } to { opacity: 1; } }
 .ep-fade { animation: epFade var(--dur-base) var(--ease-out) both; }
 
-/* ── the start screen's video backdrop ─────────────────────
-   The film plays behind the name field, dimmed enough that white text on it
-   stays readable while the motion is still plainly there. Two layers rather
-   than one: a flat wash for contrast, and a vignette so the corners fall away
-   and the centre -- where the form sits -- keeps the most of the picture. */
+/* ── the film behind the app ───────────────────────────────
+   Behind the start screen and the workspace (see backdrop.tsx), dimmed enough
+   that white text on it stays readable while the motion is still plainly
+   there. Two layers rather than one: a flat wash for contrast, and a vignette
+   so the corners fall away and the centre keeps the most of the picture. */
 .ep-backdrop {
   position: fixed;
   inset: 0;
@@ -196,6 +191,19 @@
 .ep-lift:hover { transform: translateY(-4px); }
 
 @media (prefers-reduced-motion: reduce) {
+  .ep-rise { animation: none; }
+  /* Looping animations are stopped outright. Shortening them to 1ms, as the
+     rule below does for everything else, would leave them cycling once a
+     millisecond -- a flicker at the frame rate rather than stillness. */
+  .ep-pulse { animation: none !important; opacity: .6; }
+  /* The light still follows the pointer -- it is position, not motion -- but
+     the press no longer shrinks the button or sends out a ring. */
+  .ep-glow:active { transform: none; }
+  .ep-ripple { display: none; }
   [data-reveal] { opacity: 1; transform: none; }
   .ep-lift:hover { transform: none; }
+  *, *::before, *::after {
+    animation-duration: 1ms !important;
+    transition-duration: 1ms !important;
+  }
 }
