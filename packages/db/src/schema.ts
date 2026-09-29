@@ -302,8 +302,6 @@ export const messages = pgTable(
     /** Query actually issued to retrieval after history-aware rewriting. */
     rewrittenQuery: text("rewritten_query"),
     latencyMs: integer("latency_ms"),
-    promptTokens: integer("prompt_tokens"),
-    completionTokens: integer("completion_tokens"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -325,7 +323,6 @@ export const messageSources = pgTable(
     /** The literal marker used in the answer text, e.g. "S1". */
     marker: varchar("marker", { length: 8 }).notNull(),
     rank: integer("rank").notNull(),
-    score: real("score"),
   },
   (t) => [index("message_sources_message_idx").on(t.messageId, t.rank)],
 );

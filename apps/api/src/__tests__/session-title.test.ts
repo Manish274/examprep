@@ -14,14 +14,14 @@ beforeAll(() => {
 /** The sidebar shows one line per conversation; an untitled row is useless. */
 describe("session titles", () => {
   it("uses a short question as the title unchanged", async () => {
-    const { deriveTitle } = await import("../ws/hub.js");
+    const { deriveTitle } = await import("../ws/chat.js");
     expect(deriveTitle("what is write ahead logging")).toBe(
       "what is write ahead logging",
     );
   });
 
   it("cuts a long question on a word boundary", async () => {
-    const { deriveTitle } = await import("../ws/hub.js");
+    const { deriveTitle } = await import("../ws/chat.js");
     const title = deriveTitle(
       "how do I handle words that never appeared in my training corpus at all",
     );
@@ -36,17 +36,17 @@ describe("session titles", () => {
   });
 
   it("falls back rather than titling a session with whitespace", async () => {
-    const { deriveTitle } = await import("../ws/hub.js");
+    const { deriveTitle } = await import("../ws/chat.js");
     expect(deriveTitle("   ")).toBe("New chat");
   });
 
   it("collapses newlines so the sidebar stays one line", async () => {
-    const { deriveTitle } = await import("../ws/hub.js");
+    const { deriveTitle } = await import("../ws/chat.js");
     expect(deriveTitle("explain\n\n  smoothing")).toBe("explain smoothing");
   });
 
   it("hard-cuts a single unbroken word rather than returning almost nothing", async () => {
-    const { deriveTitle } = await import("../ws/hub.js");
+    const { deriveTitle } = await import("../ws/chat.js");
     const title = deriveTitle("x".repeat(200));
     expect(title.length).toBeGreaterThan(50);
   });
