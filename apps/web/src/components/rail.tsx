@@ -32,13 +32,15 @@ export function Rail({
   onToggle: () => void;
   mode: StudyMode;
   onModeChange: (mode: StudyMode) => void;
-  sessions: ChatSessionRow[];
+  /** Null until loaded, so an outage does not read as "no chats". */
+  sessions: ChatSessionRow[] | null;
   activeSessionId: string | null;
   onOpenSession: (id: string) => void;
   onNewChat: () => void;
   name: string;
   onSignOut: () => void;
-  documentCount: number;
+  /** Null until the list has loaded. */
+  documentCount: number | null;
 }) {
   return (
     <aside
@@ -128,31 +130,48 @@ export function Rail({
           </NavItem>
         </RailSection>
 
-        <RailSection title="Chats" style={{ flex: 1, minHeight: 0 }}>
-          {sessions.length === 0 ? (
-            <p
-              style={{
-                margin: 0,
-                padding: "var(--space-3) 10px",
-                fontSize: "var(--text-sm)",
-                color: "var(--text)",
-              }}
-            >
-              Nothing yet.
-            </p>
-          ) : (
-            sessions.map((session) => (
-              <NavItem
-                key={session.id}
-                dot
-                active={session.id === activeSessionId}
-                onClick={() => onOpenSession(session.id)}
-                title={session.title ?? undefined}
+        {/* The list scrolls inside its own section, so a long history or a
+            short window never runs it under the footer. The section keeps
+            room for a couple of chats; below that the whole rail scrolls. */}
+        <RailSection title="Chats" style={{ flex: 1, minHeight: 96 }}>
+          <div
+            className="ep-scroll"
+            style={{
+              flex: 1,
+              minHeight: 0,
+              overflowY: "auto",
+              // A grid rather than a flex column: flex items would shrink to
+              // fit instead of the list scrolling.
+              display: "grid",
+              alignContent: "start",
+              gap: "var(--space-2)",
+            }}
+          >
+            {sessions === null ? null : sessions.length === 0 ? (
+              <p
+                style={{
+                  margin: 0,
+                  padding: "var(--space-3) 10px",
+                  fontSize: "var(--text-sm)",
+                  color: "var(--text)",
+                }}
               >
-                {session.title}
-              </NavItem>
-            ))
-          )}
+                Nothing yet.
+              </p>
+            ) : (
+              sessions.map((session) => (
+                <NavItem
+                  key={session.id}
+                  dot
+                  active={session.id === activeSessionId}
+                  onClick={() => onOpenSession(session.id)}
+                  title={session.title ?? undefined}
+                >
+                  {session.title}
+                </NavItem>
+              ))
+            )}
+          </div>
         </RailSection>
 
         <div
@@ -197,16 +216,18 @@ export function Rail({
               >
                 {name}
               </span>
-              <span
-                style={{
-                  display: "block",
-                  fontFamily: "var(--font-mono)",
-                  fontSize: 10,
-                  color: "var(--text)",
-                }}
-              >
-                {documentCount} {documentCount === 1 ? "document" : "documents"}
-              </span>
+              {documentCount === null ? null : (
+                <span
+                  style={{
+                    display: "block",
+                    fontFamily: "var(--font-mono)",
+                    fontSize: 10,
+                    color: "var(--text)",
+                  }}
+                >
+                  {documentCount} {documentCount === 1 ? "document" : "documents"}
+                </span>
+              )}
             </span>
             <IconButton
               icon={LogOut}

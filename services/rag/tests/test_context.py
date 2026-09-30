@@ -5,6 +5,7 @@ from app.core.tokenizer import HeuristicTokenCounter
 from app.generation.context import (
     ContextBuilder,
     cited_markers,
+    markers_in,
     verify_citations,
 )
 
@@ -20,6 +21,7 @@ def _scored(
     heading_path: list[str] | None = None,
     name: str = "notes.pdf",
     index: int = 0,
+    page_end: int | None = None,
 ) -> ScoredChunk:
     return ScoredChunk(
         chunk=Chunk(
@@ -31,6 +33,7 @@ def _scored(
                 document_name=name,
                 chunk_index=index,
                 page_number=page,
+                page_end=page_end,
                 slide_number=slide,
                 heading_path=heading_path or ["Normalization"],
                 content_hash="h" * 64,
@@ -211,3 +214,46 @@ class TestCitationVerification:
         resolved, _ = verify_citations("See [S3] and [S1].", context.sources)
 
         assert [s.marker for s in resolved] == ["S1", "S3"]
+
+
+class TestGroupedCitations:
+    def test_reads_every_marker_in_a_group(self) -> None:
+        assert cited_markers("Both colleges opened [S1, S3].") == {"S1", "S3"}
+        assert cited_markers("Both [S2,S4] and [S5; S6].") == {"S2", "S4", "S5", "S6"}
+
+    def test_reads_a_run_of_markers(self) -> None:
+        assert cited_markers("The stages [S2-S4] follow.") == {"S2", "S3", "S4"}
+        assert cited_markers("The stages [S2–S3] follow.") == {"S2", "S3"}
+
+    def test_a_backwards_or_implausible_run_is_not_expanded(self) -> None:
+        assert markers_in("S4-S2") == ["S4", "S2"]
+        assert markers_in("S1-S99") == ["S1", "S99"]
+
+    def test_markers_keep_the_order_they_were_written_in(self) -> None:
+        assert markers_in("S3, S1, S3") == ["S3", "S1"]
+
+    def test_a_grouped_citation_resolves_to_its_sources(self) -> None:
+        # The case that dropped pages 9-15 from a summary's source list.
+        context = _builder().build(
+            [_scored(f"Passage {i}.", index=i) for i in range(3)]
+        )
+        resolved, dangling = verify_citations("Summary [S1, S3].", context.sources)
+
+        assert [s.marker for s in resolved] == ["S1", "S3"]
+        assert dangling == set()
+
+
+class TestPageRanges:
+    def test_a_passage_across_a_page_break_names_both_pages(self) -> None:
+        context = _builder().build([_scored("Goa, then Madras.", page=4, page_end=5)])
+
+        assert "pp.4–5" in context.text
+        assert context.sources[0].page_number == 4
+        assert context.sources[0].page_end == 5
+
+    def test_a_passage_on_one_page_names_one(self) -> None:
+        context = _builder().build([_scored("Goa.", page=4)])
+
+        assert "p.4" in context.text
+        assert "pp." not in context.text
+        assert context.sources[0].page_end is None

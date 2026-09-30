@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from collections.abc import Callable, Sequence
 
 from app.core.models import (
@@ -56,6 +57,22 @@ _MAX_BATCH_BYTES = 12 * 1024 * 1024
 
 # Failed batches in a row before the rest of the pass is given up on.
 _FAILURES_BEFORE_STOPPING = 2
+
+# A heading as the reading prompt asks for one: "# Title", "## Section".
+_HEADING_LINE = re.compile(r"^(#{1,6})\s+(.+?)(?:\s+#+)?$")
+
+# A caption the model marked as a heading anyway. Kept as text: as a heading
+# it would become the section of every page after it -- "Table 1.3" was filed
+# as the section of seven pages of careers advice.
+_CAPTION = re.compile(
+    r"^(table|fig(ure)?\.?|chart|diagram|graph|plate|image)\s*(\d|[IVX]+\b)",
+    re.IGNORECASE,
+)
+
+# "1.2.4 Pharmaceutical Associations". The numbering says how deep a heading
+# sits, and says it the same way on every page -- where the model chooses its
+# "#" marks one page at a time, and gives the largest line on each page "#".
+_NUMBERED = re.compile(r"^(\d+(?:\.\d+)*)\.?\s+\S")
 
 # Called with (images attempted so far, images to read) as the reading goes.
 ProgressCallback = Callable[[int, int], None]
@@ -205,6 +222,64 @@ async def _read(
     return readings
 
 
+def reading_blocks(image: ExtractedImage, reading: str) -> list[ParsedBlock]:
+    """Turns one reading into blocks at the image's place.
+
+    The model marks titles and headings with "#", "##" and "###". On a page
+    rendered whole from a scan those become real headings, because the reading
+    is the page: without them every chunk of a scanned document would be cited
+    with no section at all. A numbered heading takes its level from its
+    number, and a caption marked as a heading stays text.
+
+    On a picture inside a page the document's own typography already sets the
+    headings, and a title inside a screenshot taking over the section would
+    misfile everything after it -- so there the marks are dropped and the
+    words kept as text.
+    """
+    blocks: list[ParsedBlock] = []
+    body: list[str] = []
+
+    def add(text: str, block_type: BlockType, level: int | None = None) -> None:
+        blocks.append(
+            ParsedBlock(
+                text=text,
+                type=block_type,
+                level=level,
+                page_number=image.page_number,
+                slide_number=image.slide_number,
+                order=image.order,
+                # The marker that follows this text all the way to the citation.
+                source=ContentSource.VISION,
+            )
+        )
+
+    def flush() -> None:
+        text = "\n".join(body).strip()
+        if text:
+            add(text, BlockType.FIGURE)
+        body.clear()
+
+    for line in reading.splitlines():
+        match = _HEADING_LINE.match(line.strip())
+        # Models add bold to a heading as often as not.
+        title = match.group(2).strip("*_ ") if match else ""
+        if match is None or not title:
+            body.append(line)
+        elif image.whole_page and not _CAPTION.match(title):
+            flush()
+            numbered = _NUMBERED.match(title)
+            level = (
+                min(numbered.group(1).count(".") + 1, 6)
+                if numbered
+                else len(match.group(1))
+            )
+            add(title, BlockType.HEADING, level)
+        else:
+            body.append(title)
+    flush()
+    return blocks
+
+
 async def enrich_with_vision(
     document: ParsedDocument,
     provider: VisionProvider,
@@ -266,20 +341,15 @@ async def enrich_with_vision(
     result.no_content = len(readings) - result.described
 
     new_blocks = [
-        ParsedBlock(
-            text=text,
-            type=BlockType.FIGURE,
-            page_number=image.page_number,
-            slide_number=image.slide_number,
-            order=image.order,
-            # The marker that follows this text all the way to the citation.
-            source=ContentSource.VISION,
-        )
+        block
         for image in document.images
         if (text := readings.get(image.content_hash))
+        for block in reading_blocks(image, text)
     ]
     if new_blocks:
         document.blocks.extend(new_blocks)
+        # Stable, so the blocks of one reading -- which share its image's
+        # place -- keep the order the model read them in.
         document.blocks.sort(key=lambda b: b.order)
 
     logger.info("vision: %s (%s)", document.filename, result.as_dict())

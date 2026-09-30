@@ -7,6 +7,8 @@ export interface RagChunk {
   token_count: number;
   chunk_index: number;
   page_number: number | null;
+  /** Last page, when the chunk crosses a page break. */
+  page_end: number | null;
   slide_number: number | null;
   section: string | null;
   heading: string | null;
@@ -26,7 +28,10 @@ export interface IngestResponse {
   cache_hits: number;
   /** Counts from the image-reading pass. */
   vision: Record<string, number>;
-  /** Images a deferred pass left unread; zero once the document is complete. */
+  /**
+   * Images still unread: deferred by the pass, or tried and not read (the
+   * model overloaded, or out of quota). Zero once the document is complete.
+   */
   figures_pending: number;
   page_count: number;
   block_count: number;
@@ -212,6 +217,8 @@ export const generateTest = (
     questionCount: number;
     types?: string[] | undefined;
     difficulty?: string | undefined;
+    /** Chunks earlier quizzes and card sets were written from. */
+    avoidChunkIds?: string[];
   },
   options: { correlationId?: string } = {},
 ): Promise<{ questions: GeneratedQuestion[]; stats: Record<string, number> }> =>
@@ -223,12 +230,19 @@ export const generateTest = (
       question_count: request.questionCount,
       ...(request.types ? { types: request.types } : {}),
       ...(request.difficulty ? { difficulty: request.difficulty } : {}),
+      avoid_chunk_ids: request.avoidChunkIds ?? [],
     },
     { timeoutMs: GENERATION_TIMEOUT_MS, ...options },
   );
 
 export const generateFlashcards = (
-  request: { userId: string; documentIds: string[]; cardCount: number },
+  request: {
+    userId: string;
+    documentIds: string[];
+    cardCount: number;
+    /** Chunks earlier quizzes and card sets were written from. */
+    avoidChunkIds?: string[];
+  },
   options: { correlationId?: string } = {},
 ): Promise<{ cards: GeneratedCard[]; stats: Record<string, number> }> =>
   call(
@@ -237,6 +251,7 @@ export const generateFlashcards = (
       user_id: request.userId,
       document_ids: request.documentIds,
       card_count: request.cardCount,
+      avoid_chunk_ids: request.avoidChunkIds ?? [],
     },
     { timeoutMs: GENERATION_TIMEOUT_MS, ...options },
   );

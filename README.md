@@ -259,7 +259,9 @@ A follow-up carries the exchange before it, in two places for two reasons:
 
 - **Retrieval** sees a condensed rewrite. *"How does it differ from a
   trigram"* becomes *"how does a bigram differ from a trigram"* — a pronoun is
-  not searchable.
+  not searchable. The rewrite is a model call, so it is skipped when the
+  question already names its own subject and that subject is not simply the
+  one just discussed.
 - **Generation** sees the turns themselves, so *"explain that more simply"*
   simplifies the answer just given rather than starting a fresh one.
 
@@ -299,13 +301,21 @@ from a textbook, a formula pasted as an image, a scanned page. None of it
 survives text extraction.
 
 `VISION_PROVIDER=gemini` sends those images to a multimodal model, which
-transcribes text and tables verbatim and describes real diagrams.
+transcribes text and tables verbatim and describes every diagram — both, on a
+page that has both. On a scanned page the headings it marks become the
+section trail its chunks are cited under, and each scanned page is chunked on
+its own so a fact is cited to the page it is on.
 
 Reading images is the slow part of ingestion and the only part that can run out
 of quota, so a document is ingested in two passes. The first indexes the text
 and the document is ready; the second reads the images and swaps in the chunks
 they change, while the student is already studying. A scanned PDF has no text
 to show in the meantime, so its pages are read in the first pass.
+
+An image the model could not read — overloaded, say — is never silently
+dropped. The worker tries it again after 1, 3 and 10 minutes, reading only
+what is missing, and if it still cannot be read (or the day's quota is spent)
+the document says how many images are unread.
 
 The free tier allows a few dozen vision requests a day, so every image has to
 earn its call:

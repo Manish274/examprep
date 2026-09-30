@@ -37,10 +37,18 @@ function inProgress(document: DocumentRow): boolean {
   return document.status !== "ready" || (document.figuresPending ?? 0) > 0;
 }
 
+/** How long to wait before asking again for a list that failed to load. */
+const RETRY_MS = 5000;
+
 export function useDocuments() {
   const { send, ready } = useSocket();
   const [documents, setDocuments] = useState<DocumentState[]>([]);
   const [loading, setLoading] = useState(true);
+  // Whether the list has ever loaded. Until it has, an empty list means
+  // "unknown", and saying "nothing uploaded yet" over a server that is only
+  // restarting reads as the student's work having been lost.
+  const [known, setKnown] = useState(false);
+  const [failures, setFailures] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const watched = useRef(new Set<string>());
 
@@ -58,9 +66,11 @@ export function useDocuments() {
             : row;
         });
       });
+      setKnown(true);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not load your material");
+      setFailures((count) => count + 1);
     } finally {
       setLoading(false);
     }
@@ -72,6 +82,15 @@ export function useDocuments() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void refresh();
   }, [refresh]);
+
+  // A list that never loaded is asked for again until it does, so the page
+  // comes back by itself when the server does, rather than sitting on an
+  // error until someone thinks to reload.
+  useEffect(() => {
+    if (known || failures === 0) return;
+    const timer = window.setTimeout(() => void refresh(), RETRY_MS);
+    return () => window.clearTimeout(timer);
+  }, [known, failures, refresh]);
 
   // Subscribe to anything still working. Re-run when the socket reconnects,
   // since subscriptions live on the connection and not on the server.
@@ -130,6 +149,7 @@ export function useDocuments() {
             pageCount: null,
             chunkCount: null,
             figuresPending: null,
+            figuresUnread: null,
             errorMessage: null,
             createdAt: new Date().toISOString(),
           },
@@ -162,9 +182,30 @@ export function useDocuments() {
     documents,
     ready: documents.filter((d) => d.status === "ready"),
     loading,
+    known,
     error,
     upload,
     remove,
+  };
+}
+
+/**
+ * What is missing from a ready document, or null when nothing is: images the
+ * model could not read after every try. Said on the tile, so a scan with
+ * pages missing never passes for a complete one.
+ */
+export function describeGaps(
+  document: DocumentState,
+): { short: string; long: string } | null {
+  const unread = document.figuresUnread ?? 0;
+  if (document.status !== "ready" || unread <= 0) return null;
+  const images = `${unread} image${unread === 1 ? "" : "s"}`;
+  return {
+    short: `${images} unread`,
+    long:
+      `${images} in this file could not be read — the image model was busy ` +
+      "or out of its daily allowance, so what is on them cannot be searched. " +
+      "Remove the file and upload it again later to add them.",
   };
 }
 

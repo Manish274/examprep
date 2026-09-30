@@ -10,6 +10,7 @@ having, not something to hide.
 
 from __future__ import annotations
 
+from app.chunking.structural import last_page
 from app.core.models import (
     BlockType,
     Chunk,
@@ -89,6 +90,9 @@ class FixedWindowChunker:
                         document_name=document.filename,
                         chunk_index=index,
                         page_number=page,
+                        page_end=last_page(
+                            page, [origin[0] for origin in origins[start:end]]
+                        ),
                         slide_number=slide,
                         section=section,
                         heading=None,

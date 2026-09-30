@@ -157,11 +157,40 @@ class TestNeedsContext:
             "Explain the working.",
             "Why?",
             "Can you give an example?",
-            "What is the operating voltage of the Arduino Uno?",
+            "Explain stage 2",
         ],
     )
     def test_a_dependent_follow_up_is_rewritten(self, question: str) -> None:
         assert needs_context(question)
+
+    def test_a_short_question_on_the_topic_just_discussed_is_rewritten(
+        self,
+    ) -> None:
+        history = [
+            ("user", "Where was the first pharmacy college in India?"),
+            ("assistant", "The first college of pharmacy was started in Goa in 1842."),
+        ]
+        assert needs_context("When was the college founded?", history)
+        assert needs_context("Who taught at the colleges?", history)
+
+    def test_a_short_question_on_a_new_subject_stands_alone(self) -> None:
+        history = [
+            ("user", "Where was the first pharmacy college in India?"),
+            ("assistant", "The first college of pharmacy was started in Goa in 1842."),
+        ]
+        assert not needs_context("What is Pharmakon?", history)
+        assert not needs_context(
+            "What is the operating voltage of the Arduino Uno?", history
+        )
+
+    def test_only_the_last_exchange_counts_as_the_topic(self) -> None:
+        history = [
+            ("user", "What does Pharmakon mean?"),
+            ("assistant", "Pharmakon is the Greek word for a drug."),
+            ("user", "Where was the first pharmacy college?"),
+            ("assistant", "In Goa, in 1842."),
+        ]
+        assert not needs_context("What is Pharmakon?", history)
 
     @pytest.mark.parametrize(
         "question",
@@ -174,3 +203,9 @@ class TestNeedsContext:
     )
     def test_a_self_contained_follow_up_is_not(self, question: str) -> None:
         assert not needs_context(question)
+
+
+def test_grouped_markers_are_stripped_from_earlier_answers() -> None:
+    from app.generation.history import strip_markers
+
+    assert strip_markers("Both opened [S1, S2] early [S3-S4].") == "Both opened early ."

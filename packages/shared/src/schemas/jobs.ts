@@ -12,6 +12,11 @@ export const documentProcessingJobSchema = z.object({
   storageKey: z.string(),
   filename: z.string(),
   kind: documentKindSchema,
+  /**
+   * Set on a delayed follow-up that only reads images an earlier pass could
+   * not -- the model overloaded -- and counts which try this is.
+   */
+  figuresRetry: z.number().int().min(1).max(10).optional(),
 });
 export type DocumentProcessingJob = z.infer<typeof documentProcessingJobSchema>;
 

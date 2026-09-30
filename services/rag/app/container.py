@@ -326,6 +326,8 @@ class Container:
             ),
             reranker=self.reranker,
             rerank_candidates=settings.RERANK_TOP_N,
+            dense_top_k=settings.RETRIEVAL_DENSE_TOP_K,
+            sparse_top_k=settings.RETRIEVAL_SPARSE_TOP_K,
         )
         self.chat = ChatService(
             self.retrieval,

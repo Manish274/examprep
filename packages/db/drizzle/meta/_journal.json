@@ -50,6 +50,20 @@
       "when": 1790694305066,
       "tag": "0006_figures_after_text",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1790783308190,
+      "tag": "0007_chunk_page_end",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1790787038589,
+      "tag": "0008_figures_unread",
+      "breakpoints": true
     }
   ]
 }

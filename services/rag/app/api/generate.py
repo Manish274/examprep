@@ -22,13 +22,15 @@ from app.observability.trace import identify, span
 
 router = APIRouter(tags=["generation"], dependencies=[InternalAuth])
 
+# Chunks read for one quiz or card set: in practice the whole document, so the
+# generator can choose from all of it rather than from a fixed corner.
+_GENERATION_SCAN = 2000
 
-async def _load_chunks(
-    user_id: str, document_ids: list[str] | None, limit: int
-) -> list[Chunk]:
+
+async def _load_chunks(user_id: str, document_ids: list[str] | None) -> list[Chunk]:
     container = get_container()
     chunks = await container.store.sample_chunks(
-        user_id=user_id, document_ids=document_ids, limit=limit
+        user_id=user_id, document_ids=document_ids, limit=_GENERATION_SCAN
     )
     if not chunks:
         raise HTTPException(
@@ -45,6 +47,9 @@ class GenerateTestRequest(BaseModel):
     question_count: Annotated[int, Field(ge=1, le=50)] = 10
     types: list[QuestionType] | None = None
     difficulty: str = "mixed"
+    # Chunks earlier quizzes and card sets on this document were written from,
+    # to be drawn on again only once the rest are used up.
+    avoid_chunk_ids: Annotated[list[str], Field(max_length=5000)] = []
 
 
 class QuestionResponse(BaseModel):
@@ -67,11 +72,7 @@ class GenerateTestResponse(BaseModel):
 async def generate_test(request: GenerateTestRequest) -> GenerateTestResponse:
     container = get_container()
     identify(user_id=request.user_id)
-    # Sampled wider than the question count so the generator can skip passages
-    # carrying nothing examinable.
-    chunks = await _load_chunks(
-        request.user_id, request.document_ids, request.question_count * 4
-    )
+    chunks = await _load_chunks(request.user_id, request.document_ids)
 
     async with span(
         "generate_questions",
@@ -84,6 +85,7 @@ async def generate_test(request: GenerateTestRequest) -> GenerateTestResponse:
             question_count=request.question_count,
             types=request.types,
             difficulty=request.difficulty,
+            avoid=set(request.avoid_chunk_ids),
         )
         observed.output(**result.as_dict())
 
@@ -122,6 +124,7 @@ class GenerateFlashcardsRequest(BaseModel):
     user_id: str
     document_ids: list[str] | None = None
     card_count: Annotated[int, Field(ge=1, le=100)] = 20
+    avoid_chunk_ids: Annotated[list[str], Field(max_length=5000)] = []
 
 
 class CardResponse(BaseModel):
@@ -141,15 +144,15 @@ async def generate_flashcards(
 ) -> GenerateFlashcardsResponse:
     container = get_container()
     identify(user_id=request.user_id)
-    chunks = await _load_chunks(
-        request.user_id, request.document_ids, request.card_count * 3
-    )
+    chunks = await _load_chunks(request.user_id, request.document_ids)
 
     async with span(
         "generate_cards", requested=request.card_count, chunks=len(chunks)
     ) as observed:
         result = await FlashcardGenerator(container.llm).generate(
-            chunks, card_count=request.card_count
+            chunks,
+            card_count=request.card_count,
+            avoid=set(request.avoid_chunk_ids),
         )
         observed.output(**result.as_dict())
 
@@ -187,6 +190,9 @@ class AnswerInput(BaseModel):
 
 
 class GradeRequest(BaseModel):
+    # Whose attempt this is. The trace is filed under it, so it is deleted
+    # with the rest of the visit rather than outliving it.
+    user_id: str
     answers: list[AnswerInput]
 
 
@@ -205,6 +211,7 @@ class GradeResponse(BaseModel):
 
 @router.post("/grade", response_model=GradeResponse)
 async def grade(request: GradeRequest) -> GradeResponse:
+    identify(user_id=request.user_id)
     if not request.answers:
         raise HTTPException(400, "No answers to grade")
 

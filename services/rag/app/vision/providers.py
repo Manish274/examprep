@@ -11,6 +11,10 @@ A vision model handles both shapes this takes, which pure OCR does not:
   description    a real diagram, where the useful output is a sentence saying
                  what it shows, because that is what a question will match
 
+A scanned page is usually both at once -- paragraphs with a diagram beside
+them -- so the model is asked for both, never one instead of the other.
+Reading such a page as "a diagram" is how its text used to disappear.
+
 The output is generated text, not extracted text. Everything downstream marks
 it as such, and nothing here should ever return something indistinguishable
 from words actually present in the file.
@@ -44,7 +48,7 @@ logger = logging.getLogger(__name__)
 
 # Part of every cache key. Bump it when the prompt changes, so readings made
 # under the old instructions are not served as if they followed the new ones.
-PROMPT_VERSION = 2
+PROMPT_VERSION = 4
 
 
 class VisionUnavailableError(Exception):
@@ -105,24 +109,36 @@ _PROMPT = """You are reading {count} image(s) taken from a student's study mater
 Each image follows its label -- "Image 1", "Image 2" and so on -- and sometimes \
 the text around it on the page or slide.
 
-For each image:
+For each image, give everything in it a student could be asked about:
 
-If it is text, a table, or a formula: transcribe it exactly. Preserve table \
-structure using " | " between cells and a newline between rows. Do not \
+Text, tables and formulas: transcribe them exactly, in reading order. Preserve \
+table structure using " | " between cells and a newline between rows. Start \
+the line of a title with "# ", a section heading with "## " and a subheading \
+with "### ". Mark only headings that begin a section of the document -- never \
+a table or figure caption, a label, or a line that is merely bold. Do not \
 summarise, do not add commentary, do not correct anything.
 
-If it is a diagram, chart, or illustration: describe what it shows in two or \
-three sentences, naming the parts and their relationships, so that a student \
-searching for this concept would match your description. Include any labels or \
-axis titles verbatim.
+Diagrams, charts, flowcharts and illustrations: describe what each one shows \
+in two or three sentences on a line of its own starting "Figure: ", placed \
+where it sits in the reading order. Name the parts and how they relate, so \
+that a student searching for this concept would match your description, and \
+give every label, box and axis title verbatim -- a list drawn as a diagram is \
+still a list, so name all of its items.
 
-If it is decorative and carries no study content -- a logo, a border, a stock \
-photograph -- its content is exactly: NO_CONTENT
+Many images hold both -- a page of paragraphs with a diagram beside them, a \
+slide with a title above a chart. Give both: every word of the text and a \
+description of every diagram. Never describe a page in place of transcribing \
+its text.
+
+Leave out watermarks and page numbers.
+
+If the image is decorative and carries no study content -- a logo, a border, \
+a stock photograph -- its content is exactly: NO_CONTENT
 
 Read every image on its own. Never carry text from one image into another's \
 entry.
 
-Return one entry per image: its number, and the transcription or description."""
+Return one entry per image: its number, and its content."""
 
 _SCHEMA: dict[str, Any] = {
     "type": "ARRAY",

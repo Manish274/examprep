@@ -232,6 +232,9 @@ export const testRoutes = new Hono<AppEnv>()
         // Regrading would let a student resubmit after seeing the answers.
         throw conflict("This attempt has already been graded.");
       }
+      if (attempt.status === "submitted") {
+        throw conflict("This attempt is already being graded.");
+      }
 
       const questions = await db()
         .select()
@@ -264,52 +267,92 @@ export const testRoutes = new Hono<AppEnv>()
 
       const responses = new Map(answers.map((a) => [a.questionId, a.response]));
 
-      const result = await gradeAnswers(
-        questions.map((q) => ({
-          question_id: q.id,
-          question_type: q.type,
-          prompt: q.prompt,
-          correct_answer: q.correctAnswer,
-          explanation: q.explanation,
-          // A question left blank is graded as blank rather than skipped, so
-          // the score denominator stays the whole paper.
-          response: responses.get(q.id) ?? null,
-          options: q.options,
-          source_text: q.sourceChunkId
-            ? (chunkText.get(q.sourceChunkId) ?? "")
-            : "",
-        })),
-        { correlationId: attemptId },
-      );
+      // Claimed before grading, in one conditional update: of two submits
+      // racing each other, exactly one moves the attempt out of in_progress.
+      // Checking the status and grading afterwards let both through, each
+      // grading and writing its own answers.
+      const now = new Date();
+      const [claimed] = await db()
+        .update(testAttempts)
+        .set({ status: "submitted", submittedAt: now })
+        .where(
+          and(
+            eq(testAttempts.id, attemptId),
+            eq(testAttempts.userId, userId),
+            eq(testAttempts.status, "in_progress"),
+          ),
+        )
+        .returning({ id: testAttempts.id });
+      if (!claimed) {
+        throw conflict("This attempt has already been submitted.");
+      }
 
-      await db()
-        .delete(attemptAnswers)
-        .where(eq(attemptAnswers.attemptId, attemptId));
-
-      await db()
-        .insert(attemptAnswers)
-        .values(
-          result.graded.map((g) => ({
-            attemptId,
-            questionId: g.question_id,
-            response: responses.get(g.question_id) ?? null,
-            isCorrect: g.is_correct,
-            awarded: g.awarded,
-            feedback: g.feedback,
+      let result: Awaited<ReturnType<typeof gradeAnswers>>;
+      try {
+        result = await gradeAnswers(
+          userId,
+          questions.map((q) => ({
+            question_id: q.id,
+            question_type: q.type,
+            prompt: q.prompt,
+            correct_answer: q.correctAnswer,
+            explanation: q.explanation,
+            // A question left blank is graded as blank rather than skipped, so
+            // the score denominator stays the whole paper.
+            response: responses.get(q.id) ?? null,
+            options: q.options,
+            source_text: q.sourceChunkId
+              ? (chunkText.get(q.sourceChunkId) ?? "")
+              : "",
           })),
+          { correlationId: attemptId },
         );
 
-      const now = new Date();
-      await db()
-        .update(testAttempts)
-        .set({
-          status: "graded",
-          score: result.score,
-          maxScore: result.max_score,
-          submittedAt: now,
-          gradedAt: now,
-        })
-        .where(eq(testAttempts.id, attemptId));
+        await db().transaction(async (tx) => {
+          await tx
+            .delete(attemptAnswers)
+            .where(eq(attemptAnswers.attemptId, attemptId));
+
+          await tx.insert(attemptAnswers).values(
+            result.graded.map((g) => ({
+              attemptId,
+              questionId: g.question_id,
+              response: responses.get(g.question_id) ?? null,
+              isCorrect: g.is_correct,
+              awarded: g.awarded,
+              feedback: g.feedback,
+            })),
+          );
+
+          await tx
+            .update(testAttempts)
+            .set({
+              status: "graded",
+              score: result.score,
+              maxScore: result.max_score,
+              gradedAt: new Date(),
+            })
+            .where(eq(testAttempts.id, attemptId));
+        });
+      } catch (err) {
+        // Handed back, so a grading that failed -- the model rate limited,
+        // the service restarting -- can be submitted again.
+        await db()
+          .update(testAttempts)
+          .set({ status: "in_progress", submittedAt: null })
+          .where(
+            and(
+              eq(testAttempts.id, attemptId),
+              eq(testAttempts.status, "submitted"),
+            ),
+          )
+          .catch((releaseErr: unknown) => {
+            // Reported, not thrown: the grading failure is the error that
+            // explains what happened.
+            logger.error({ err: releaseErr, attemptId }, "could not release attempt");
+          });
+        throw err;
+      }
 
       return c.json({
         attemptId,

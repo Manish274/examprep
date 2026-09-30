@@ -22,6 +22,7 @@ import { useChat } from "@/hooks/use-chat";
 import {
   describeActivity,
   describeDocument,
+  describeGaps,
   useDocuments,
 } from "@/hooks/use-documents";
 import { useStudy } from "@/hooks/use-study";
@@ -146,6 +147,7 @@ export default function StudyPage() {
                     : "working"
                 }
                 activity={describeActivity(document)}
+                gaps={describeGaps(document)}
                 onRemove={() => void docs.remove(document.id)}
               />
             ))
@@ -170,7 +172,7 @@ export default function StudyPage() {
 
   const hints = (
     <>
-      {docs.documents.length === 0 && !docs.loading ? (
+      {docs.known && docs.documents.length === 0 ? (
         <p
           style={{
             margin: "var(--space-6) 0 0",
@@ -225,7 +227,7 @@ export default function StudyPage() {
           await signOut();
           router.replace("/");
         }}
-        documentCount={docs.documents.length}
+        documentCount={docs.known ? docs.documents.length : null}
       />
 
       <main

@@ -709,6 +709,9 @@ function renderDocuments() {
     if (doc.errorMessage) {
       status.append(el("div", "err", doc.errorMessage));
     }
+    if (doc.figuresUnread) {
+      status.append(el("div", "err", `${doc.figuresUnread} image(s) could not be read`));
+    }
     row.append(status);
 
     const progress = el("td", "mono", doc.status === "ready" ? "—" : "waiting");
@@ -778,6 +781,12 @@ async function deleteDocument(doc) {
   }
 }
 
+// "p.4", or "pp.4–5" for a passage that runs across a page break.
+function pages(item) {
+  if (!item.pageNumber) return null;
+  return item.pageEnd ? `pp.${item.pageNumber}–${item.pageEnd}` : `p.${item.pageNumber}`;
+}
+
 async function showChunks(doc) {
   try {
     const { chunks } = await api(`/api/documents/${doc.id}/chunks`);
@@ -792,7 +801,7 @@ async function showChunks(doc) {
       top.append(el("span", "head", (chunk.headingPath || []).join(" › ") || chunk.heading || "—"));
       block.append(top);
       const where = [
-        chunk.pageNumber ? `p.${chunk.pageNumber}` : null,
+        pages(chunk),
         chunk.slideNumber ? `slide ${chunk.slideNumber}` : null,
         `${chunk.tokenCount} tok`,
         chunk.source === "vision" ? "read from an image" : null,
@@ -1013,7 +1022,7 @@ function renderSources(sources) {
     const where = [
       source.documentName,
       source.slideNumber ? `slide ${source.slideNumber}` : null,
-      source.pageNumber ? `p.${source.pageNumber}` : null,
+      pages(source),
       (source.headingPath || []).join(" › ") || null,
     ].filter(Boolean).join(" · ");
     line.append(document.createTextNode(where));

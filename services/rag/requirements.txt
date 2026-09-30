@@ -8,6 +8,9 @@ httpx==0.28.1
 # ── document parsing ────────────────────────────────────────
 pymupdf==1.25.1
 python-pptx==1.0.2
+# Encodes rendered scans: libjpeg-turbo is several times faster than PyMuPDF's
+# own JPEG writer. Already required by python-pptx; pinned because it is used.
+pillow==11.3.0
 
 # ── vector store + sparse retrieval ─────────────────────────
 qdrant-client==1.12.2

@@ -39,13 +39,13 @@ export function QuizOption({
       key: "var(--text-accent)",
     },
     correct: {
-      border: "rgba(127,179,163,.4)",
-      bg: "rgba(127,179,163,.1)",
+      border: "color-mix(in srgb, var(--state-correct) 40%, transparent)",
+      bg: "color-mix(in srgb, var(--state-correct) 10%, transparent)",
       key: "var(--text-correct)",
     },
     wrong: {
-      border: "rgba(229,105,91,.4)",
-      bg: "rgba(229,105,91,.1)",
+      border: "color-mix(in srgb, var(--state-wrong) 40%, transparent)",
+      bg: "color-mix(in srgb, var(--state-wrong) 10%, transparent)",
       key: "var(--text-wrong)",
     },
   }[state];

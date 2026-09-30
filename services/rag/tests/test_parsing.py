@@ -122,6 +122,36 @@ class TestPdfParser:
         assert doc.blocks == []
 
 
+class TestScannedPages:
+    async def test_a_scan_is_rendered_once_as_jpeg_and_a_drawing_as_png(
+        self, tmp_path
+    ) -> None:
+        # A scan is continuous tone, where JPEG is a fraction of PNG's size; a
+        # page drawn in vectors is flat colour, where PNG wins. Each page is
+        # encoded once, in the format that suits it.
+        import fitz
+        from PIL import Image
+
+        photo = tmp_path / "scan.png"
+        Image.effect_noise((400, 500), 64).convert("RGB").save(photo)
+        pdf = fitz.open()
+        scanned = pdf.new_page()
+        scanned.insert_image(scanned.rect, filename=str(photo))
+        drawn = pdf.new_page()
+        drawn.draw_rect(fitz.Rect(50, 50, 300, 200), color=(0, 0, 0))
+        path = tmp_path / "scan.pdf"
+        pdf.save(path)
+        pdf.close()
+
+        doc = await PyMuPDFParser().parse(path, document_id="d", filename="scan.pdf")
+
+        assert [(i.page_number, i.mime_type, i.whole_page) for i in doc.images] == [
+            (1, "image/jpeg", True),
+            (2, "image/png", True),
+        ]
+        assert all(i.data for i in doc.images)
+
+
 class TestPptxParser:
     def test_declares_the_formats_it_handles(self) -> None:
         parser = PythonPptxParser()

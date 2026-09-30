@@ -154,10 +154,17 @@ class RetrievalService:
         reranker: Reranker | None = None,
         *,
         rerank_candidates: int = 25,
+        dense_top_k: int = 50,
+        sparse_top_k: int = 50,
     ) -> None:
         self.dense = dense
         self.sparse = sparse
         self.hybrid = hybrid
+        # How wide each half of a hybrid search casts, for every caller that
+        # does not say otherwise -- chat included, so the configured values
+        # are the ones in force rather than only the retrieval lab's.
+        self.dense_top_k = dense_top_k
+        self.sparse_top_k = sparse_top_k
         self.reranker = reranker
         # How many fused candidates the reranker sees. Retrieving wide and
         # reranking down is the whole point: a chunk that never enters this
@@ -172,8 +179,8 @@ class RetrievalService:
         strategy: RetrievalStrategy = RetrievalStrategy.HYBRID,
         document_ids: Sequence[str] | None = None,
         top_k: int = 25,
-        dense_top_k: int = 50,
-        sparse_top_k: int = 50,
+        dense_top_k: int | None = None,
+        sparse_top_k: int | None = None,
     ) -> list[ScoredChunk]:
         if strategy is RetrievalStrategy.DENSE:
             return await self.dense.search(
@@ -195,8 +202,8 @@ class RetrievalService:
             user_id=user_id,
             document_ids=document_ids,
             top_k=max(self.rerank_candidates, top_k) if reranker else top_k,
-            dense_top_k=dense_top_k,
-            sparse_top_k=sparse_top_k,
+            dense_top_k=dense_top_k or self.dense_top_k,
+            sparse_top_k=sparse_top_k or self.sparse_top_k,
         )
 
         if reranker is None:

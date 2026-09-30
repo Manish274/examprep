@@ -16,7 +16,6 @@
   --line-3:rgba(255,255,255,.22);
 
   /* --- Accent: blue. Retrieval, citations, focus, primary action. --- */
-  --blue-100:#DCE7FD;
   --blue-300:#9DBAF6;
   --blue-500:#5B8DEF;
   --blue-600:#4478DE;
@@ -41,8 +40,9 @@
   /* Text is set at one brightness everywhere, so every word on every page
      reads as clearly as every other; hierarchy comes from size and weight,
      never from dimming. Coloured text keeps its hue but is lightened to sit
-     at nearly the same brightness: the saturated hues above are for dots,
-     borders and fills, and are too dark to read as text on ink. */
+     at nearly the same brightness: the saturated hues above are too dark
+     to read as text on ink, and are used -- through the --state-* aliases
+     below, mixed down to a tint -- for borders and fills only. */
   --text:var(--paper-0);
   --text-oncolor:#0A0A0B;
   --text-accent:#D3E1FD;

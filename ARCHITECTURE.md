@@ -114,9 +114,10 @@ name (`structural`, or the `fixed_window` baseline).
 
 ## 5. Preserved chunk metadata
 
-`document_id`, `document_name`, `chunk_index`, `page_number`, `slide_number`,
-`section`, `heading`, `heading_path`, `char_start`, `char_end`,
-`content_hash`, and `source` (text or vision).
+`document_id`, `document_name`, `chunk_index`, `page_number`, `page_end`
+(the last page, when a chunk crosses a page break, so it is cited as
+"pp.4–5"), `slide_number`, `section`, `heading`, `heading_path`, `char_start`,
+`char_end`, `content_hash`, and `source` (text or vision).
 
 Returned with every answer so the web app can render exact citations.
 

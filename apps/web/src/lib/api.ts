@@ -35,8 +35,8 @@ export function getSession(): Session | null {
   try {
     const saved = window.localStorage.getItem(STORAGE_KEY);
     const parsed = saved ? (JSON.parse(saved) as Session) : null;
-    // A session saved by the old email sign-in has no name, and its tokens
-    // name no visit the API still accepts. Starting again is the only way on.
+    // An entry without the shape this build writes -- no name to greet the
+    // student by -- is discarded, and the visit starts again.
     session = typeof parsed?.user?.name === "string" ? parsed : null;
   } catch {
     // A corrupt entry must not stop the app from loading; it only means
@@ -130,13 +130,24 @@ export async function request<T>(
   }
   if (body !== undefined && !isForm) merged.set("content-type", "application/json");
 
-  const response = await fetch(new URL(path, API_URL), {
-    ...rest,
-    headers: merged,
-    ...(body === undefined
-      ? {}
-      : { body: isForm ? body : JSON.stringify(body) }),
-  });
+  let response: Response;
+  try {
+    response = await fetch(new URL(path, API_URL), {
+      ...rest,
+      headers: merged,
+      ...(body === undefined
+        ? {}
+        : { body: isForm ? body : JSON.stringify(body) }),
+    });
+  } catch (err) {
+    // An abort is the caller's own doing; anything else is the network.
+    if (err instanceof DOMException && err.name === "AbortError") throw err;
+    throw new ApiError(
+      "Can't reach the server right now. Nothing you uploaded has been lost.",
+      0,
+      "network",
+    );
+  }
 
   if (response.status === 401 && !anonymous && !retried) {
     if (await refreshAccess()) return request<T>(path, options, true);
@@ -225,6 +236,8 @@ export interface DocumentRow {
   chunkCount: number | null;
   /** Images still being read after the document became ready. */
   figuresPending: number | null;
+  /** Images that could not be read after every try. */
+  figuresUnread: number | null;
   errorMessage: string | null;
   createdAt: string;
 }

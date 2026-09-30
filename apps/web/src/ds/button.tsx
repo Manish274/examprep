@@ -74,7 +74,7 @@ const BTN_DISABLED: CSSProperties = {
 
 // Filled buttons lighten on hover, never darken, and opacity never signals it.
 const BTN_HOVER: Record<ButtonVariant, CSSProperties> = {
-  primary: { background: "var(--blue-300)", borderColor: "var(--blue-300)" },
+  primary: { background: "var(--accent-hover)", borderColor: "var(--accent-hover)" },
   paper: { background: "#FFFFFF", borderColor: "#FFFFFF" },
   secondary: { background: "var(--surface-hover)" },
   ghost: { background: "var(--surface-raised)", color: "var(--text)" },

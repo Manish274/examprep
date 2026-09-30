@@ -6,6 +6,7 @@ from app.chunking.fixed import FixedWindowChunker
 from app.chunking.structural import StructuralChunker
 from app.core.models import (
     BlockType,
+    ContentSource,
     DocumentKind,
     ParsedBlock,
     ParsedDocument,
@@ -375,3 +376,66 @@ class TestFixedWindowBaseline:
     def test_rejects_overlap_larger_than_the_window(self) -> None:
         with pytest.raises(ValueError, match="overlap_tokens"):
             FixedWindowChunker(target_tokens=100, overlap_tokens=100)
+
+
+def _reading(text: str, order: int, page: int) -> ParsedBlock:
+    return ParsedBlock(
+        text=text,
+        type=BlockType.FIGURE,
+        page_number=page,
+        order=order,
+        source=ContentSource.VISION,
+    )
+
+
+class TestPageRanges:
+    def test_a_chunk_crossing_a_page_break_records_its_last_page(self) -> None:
+        chunks = _chunker(target_tokens=200).chunk(
+            _doc(
+                _para("The first college opened in Goa in 1842.", 0, page=4),
+                _para("A second followed in Madras in 1860.", 1, page=5),
+            )
+        )
+
+        assert len(chunks) == 1
+        assert chunks[0].metadata.page_number == 4
+        assert chunks[0].metadata.page_end == 5
+
+    def test_a_chunk_on_one_page_has_no_last_page(self) -> None:
+        chunks = _chunker().chunk(_doc(_para("A relation is in 3NF.", 0, page=3)))
+        assert chunks[0].metadata.page_end is None
+
+    def test_each_scanned_page_starts_its_own_chunk(self) -> None:
+        # Two page readings fit one chunk easily, and packing them together
+        # cited everything on the second page as the first.
+        chunks = _chunker(target_tokens=400, min_tokens=0).chunk(
+            _doc(
+                _reading("Pharmacy comes from the Greek word Pharmakon.", 0, page=1),
+                _reading("The first college opened in Goa in 1842.", 1, page=2),
+            )
+        )
+
+        assert [(c.metadata.page_number, c.metadata.page_end) for c in chunks] == [
+            (1, None),
+            (2, None),
+        ]
+
+    def test_readings_on_one_page_still_share_a_chunk(self) -> None:
+        chunks = _chunker(target_tokens=400, min_tokens=0).chunk(
+            _doc(
+                _reading("Figure: a timeline of colleges.", 0, page=6),
+                _reading("Figure: a map of the first colleges.", 1, page=6),
+            )
+        )
+        assert len(chunks) == 1
+
+    def test_the_fixed_baseline_records_its_last_page_too(self) -> None:
+        chunks = FixedWindowChunker(
+            target_tokens=1000, overlap_tokens=0, counter=COUNTER
+        ).chunk(
+            _doc(
+                _para("Words on the first page.", 0, page=1),
+                _para("Words on the second page.", 1, page=2),
+            )
+        )
+        assert (chunks[0].metadata.page_number, chunks[0].metadata.page_end) == (1, 2)

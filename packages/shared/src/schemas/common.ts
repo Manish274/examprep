@@ -21,4 +21,3 @@ export const retrievalStrategySchema = z.enum([
   "hybrid",
   "hybrid_rerank",
 ]);
-export type RetrievalStrategy = z.infer<typeof retrievalStrategySchema>;

@@ -20,6 +20,7 @@ from __future__ import annotations
 import logging
 import uuid
 from collections.abc import Sequence
+from typing import Any
 
 from qdrant_client import AsyncQdrantClient, models
 
@@ -35,6 +36,11 @@ logger = logging.getLogger(__name__)
 
 DENSE = "dense"
 SPARSE = "sparse"
+
+# Points per scroll request when reading a scope back, and the most one sample
+# reads -- a few thousand chunks is a very long textbook.
+_SCROLL_PAGE = 256
+_SAMPLE_SCAN_CAP = 5000
 
 
 class QdrantStore:
@@ -116,6 +122,7 @@ class QdrantStore:
             "text": chunk.text,
             "token_count": chunk.token_count,
             "page_number": meta.page_number,
+            "page_end": meta.page_end,
             "slide_number": meta.slide_number,
             "section": meta.section,
             "heading": meta.heading,
@@ -213,6 +220,7 @@ class QdrantStore:
                 document_name=str(payload.get("document_name", "")),
                 chunk_index=int(payload.get("chunk_index") or 0),
                 page_number=payload.get("page_number"),
+                page_end=payload.get("page_end"),
                 slide_number=payload.get("slide_number"),
                 section=payload.get("section"),
                 heading=payload.get("heading"),
@@ -278,19 +286,36 @@ class QdrantStore:
         document_ids: Sequence[str] | None = None,
         limit: int = 25,
     ) -> list[Chunk]:
-        """Reads indexed chunks back out, for gold-set generation.
+        """An even spread of `limit` chunks across everything in scope, in
+        reading order -- or all of them, when there are no more than that.
 
         Scrolls rather than searches: this wants a representative sample of the
-        corpus, not the answer to any particular question.
+        corpus, not the answer to any particular question. And it scrolls the
+        whole scope, not one page of it: a scroll comes back in point-id order,
+        and point ids are hashes, so the first `limit` points are an arbitrary
+        corner of the document -- the same corner every time, which is how a
+        quiz and a card set came to be written from the same passages.
         """
-        points, _ = await self._client.scroll(
-            collection_name=self._collection,
-            scroll_filter=self._filter(user_id, document_ids),
-            limit=limit,
-            with_payload=True,
-            with_vectors=False,
-        )
-        return [self._to_scored(p, dense_score=True).chunk for p in points]
+        chunks: list[Chunk] = []
+        offset: Any = None
+        while len(chunks) < _SAMPLE_SCAN_CAP:
+            points, offset = await self._client.scroll(
+                collection_name=self._collection,
+                scroll_filter=self._filter(user_id, document_ids),
+                limit=_SCROLL_PAGE,
+                offset=offset,
+                with_payload=True,
+                with_vectors=False,
+            )
+            chunks.extend(self._to_scored(p, dense_score=True).chunk for p in points)
+            if offset is None:
+                break
+
+        chunks.sort(key=lambda c: (c.metadata.document_id, c.metadata.chunk_index))
+        if limit <= 0 or len(chunks) <= limit:
+            return chunks if limit > 0 else []
+        step = len(chunks) / limit
+        return [chunks[int(i * step)] for i in range(limit)]
 
     async def known_chunk_ids(
         self, chunk_ids: Sequence[str], *, user_id: str

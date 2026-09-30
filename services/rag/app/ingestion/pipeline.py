@@ -132,8 +132,19 @@ class IngestionResult:
 
     @property
     def figures_pending(self) -> int:
-        """Images left unread by a pass that deferred them."""
-        return self.vision.get("pending", 0)
+        """Images still to be read: deferred by this pass, or tried and not
+        read -- the model overloaded, or the day's quota spent.
+
+        Counting only the deferred ones is how an overloaded model used to
+        cost a scanned document four of its pages for good: they were
+        reported as failed, the document as complete, and nothing ever asked
+        again. Uncached, they are what a later pass reads.
+        """
+        return (
+            self.vision.get("pending", 0)
+            + self.vision.get("failed", 0)
+            + self.vision.get("skipped_quota", 0)
+        )
 
 
 async def parse_and_chunk(
@@ -194,11 +205,19 @@ async def parse_and_chunk(
         vision_ms = int((time.perf_counter() - started) * 1000)
 
     if not document.blocks:
-        if vision_stats.get("skipped_quota") or vision_stats.get("failed"):
+        # Two causes, told apart because they need different advice: a spent
+        # quota is back tomorrow, an overloaded model usually within minutes.
+        if vision_stats.get("skipped_quota"):
             raise EmptyDocumentError(
-                "This document's pages are images, and they could not be read "
-                "right now -- the free daily quota for reading images may be "
-                "used up. Try uploading it again later."
+                "This document's pages are images, and today's free allowance "
+                "for reading images is used up. Try uploading it again "
+                "tomorrow."
+            )
+        if vision_stats.get("failed"):
+            raise EmptyDocumentError(
+                "This document's pages are images, and the image model could "
+                "not read them just now -- it may be overloaded. Try uploading "
+                "it again in a few minutes."
             )
         raise EmptyDocumentError(
             "No extractable text found. If this is a scanned document, enable "

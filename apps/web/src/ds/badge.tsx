@@ -14,19 +14,19 @@ const BADGE_TONES: Record<BadgeTone, CSSProperties> = {
     borderColor: "var(--blue-tint-32)",
   },
   correct: {
-    background: "rgba(127,179,163,.14)",
+    background: "color-mix(in srgb, var(--state-correct) 14%, transparent)",
     color: "var(--text-correct)",
-    borderColor: "rgba(127,179,163,.32)",
+    borderColor: "color-mix(in srgb, var(--state-correct) 32%, transparent)",
   },
   review: {
-    background: "rgba(232,197,71,.14)",
+    background: "color-mix(in srgb, var(--state-review) 14%, transparent)",
     color: "var(--text-review)",
-    borderColor: "rgba(232,197,71,.32)",
+    borderColor: "color-mix(in srgb, var(--state-review) 32%, transparent)",
   },
   wrong: {
-    background: "rgba(229,105,91,.14)",
+    background: "color-mix(in srgb, var(--state-wrong) 14%, transparent)",
     color: "var(--text-wrong)",
-    borderColor: "rgba(229,105,91,.32)",
+    borderColor: "color-mix(in srgb, var(--state-wrong) 32%, transparent)",
   },
 };
 

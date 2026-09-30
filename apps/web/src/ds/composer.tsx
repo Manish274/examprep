@@ -176,6 +176,7 @@ export function AttachmentTile({
   meta,
   status,
   activity,
+  gaps,
   onRemove,
 }: {
   name: string;
@@ -183,13 +184,17 @@ export function AttachmentTile({
   status: "working" | "ready" | "failed";
   /** What is happening to it right now, e.g. "indexing 40%". */
   activity?: string | null;
+  /** What is missing from it: a few words for the tile, and the explanation. */
+  gaps?: { short: string; long: string } | null;
   onRemove?: () => void;
 }) {
   const failed = status === "failed";
   const indexing = status === "working" || Boolean(activity);
+  const warning = !failed && !activity ? gaps : null;
 
   return (
     <div
+      title={warning?.long}
       style={{
         display: "flex",
         alignItems: "center",
@@ -197,7 +202,13 @@ export function AttachmentTile({
         height: 38,
         padding: "0 8px 0 10px",
         background: "var(--ink-2)",
-        border: `1px solid ${failed ? "rgba(229,105,91,.32)" : "var(--border-subtle)"}`,
+        border: `1px solid ${
+          failed
+            ? "color-mix(in srgb, var(--state-wrong) 32%, transparent)"
+            : warning
+              ? "color-mix(in srgb, var(--state-review) 32%, transparent)"
+              : "var(--border-subtle)"
+        }`,
         borderRadius: "var(--radius-md)",
         maxWidth: 260,
       }}
@@ -231,10 +242,14 @@ export function AttachmentTile({
             display: "block",
             fontFamily: "var(--font-mono)",
             fontSize: 10,
-            color: failed ? "var(--text-wrong)" : "var(--text)",
+            color: failed
+              ? "var(--text-wrong)"
+              : warning
+                ? "var(--text-review)"
+                : "var(--text)",
           }}
         >
-          {failed ? "failed" : (activity ?? meta ?? "")}
+          {failed ? "failed" : (activity ?? warning?.short ?? meta ?? "")}
         </span>
       </span>
       {onRemove ? (

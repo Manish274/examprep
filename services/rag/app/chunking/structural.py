@@ -62,6 +62,22 @@ class _Segment:
     pieces: list[_Piece] = field(default_factory=list)
 
 
+def _place(piece: _Piece) -> tuple[int | None, int | None]:
+    return piece.block.page_number, piece.block.slide_number
+
+
+def last_page(first: int | None, pages: list[int | None]) -> int | None:
+    """The page a chunk runs on to, when it runs past its first one.
+
+    A chunk citing only its first page sends the student to the wrong page
+    for everything that followed the page break.
+    """
+    known = [page for page in pages if page is not None]
+    if first is None or not known or max(known) <= first:
+        return None
+    return max(known)
+
+
 class StructuralChunker:
     name = "structural"
 
@@ -199,6 +215,18 @@ class StructuralChunker:
         current_tokens = 0
 
         for piece in segment.pieces:
+            # A picture read on a new page starts a new chunk, with no overlap
+            # carried in from the page before. A scanned document is nothing
+            # but such readings, one per page, and packing two of them into
+            # one chunk is how page 2's facts came to be cited as page 1.
+            if (
+                current
+                and piece.block.type == BlockType.FIGURE
+                and _place(piece) != _place(current[-1])
+            ):
+                groups.append(current)
+                current, current_tokens = [], 0
+
             # An oversized atomic piece becomes its own chunk rather than
             # dragging a partial neighbour along with it.
             if piece.atomic and piece.tokens > self.target_tokens:
@@ -346,6 +374,9 @@ class StructuralChunker:
                         document_name=document.filename,
                         chunk_index=index,
                         page_number=first.page_number,
+                        page_end=last_page(
+                            first.page_number, [p.block.page_number for p in pieces]
+                        ),
                         slide_number=first.slide_number,
                         section=segment.section,
                         heading=segment.heading,

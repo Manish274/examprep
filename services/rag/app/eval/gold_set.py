@@ -22,7 +22,6 @@ identical data, not as an absolute quality score.
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import re
 from collections.abc import Sequence
@@ -155,10 +154,3 @@ class SyntheticGoldSetBuilder:
 
         logger.info("generated %s gold queries from %s chunks", len(gold), len(chunks))
         return gold
-
-
-def gold_from_json(payload: str) -> list[GoldQuery]:
-    """Parses a hand-written gold set supplied inline rather than as a file."""
-    data = json.loads(payload)
-    entries = data["queries"] if isinstance(data, dict) else data
-    return [GoldQuery.from_dict(entry) for entry in entries]

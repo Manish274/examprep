@@ -154,21 +154,6 @@ class TestHarness:
 
         assert by_name["hybrid"] > by_name["dense"] > by_name["bm25"]
 
-    async def test_names_the_winner(self) -> None:
-        retrieval = FakeRetrieval(
-            {
-                RetrievalStrategy.BM25: ["wrong"],
-                RetrievalStrategy.DENSE: ["wrong"],
-                RetrievalStrategy.HYBRID: ["wrong"],
-                RetrievalStrategy.HYBRID_RERANK: ["right"],
-            }
-        )
-        report = await EvaluationHarness(retrieval).run(GOLD, user_id="u")
-        best = report.best_by("mrr")
-
-        assert best is not None
-        assert best.strategy == "hybrid_rerank"
-
     async def test_one_failing_query_does_not_abandon_the_run(self) -> None:
         report = await EvaluationHarness(ExplodingRetrieval("what is 3NF")).run(
             GOLD, user_id="u", strategies=[RetrievalStrategy.HYBRID]

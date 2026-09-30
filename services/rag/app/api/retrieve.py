@@ -18,7 +18,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from app.api.deps import CorrelationId, InternalAuth, SettingsDep
+from app.api.deps import CorrelationId, InternalAuth
 from app.container import get_container
 from app.core.models import RetrievalStrategy, ScoredChunk
 from app.observability.trace import identify
@@ -57,6 +57,7 @@ class RetrievedChunkResponse(BaseModel):
     document_name: str
     chunk_index: int
     page_number: int | None
+    page_end: int | None
     slide_number: int | None
     section: str | None
     heading: str | None
@@ -81,6 +82,7 @@ class RetrievedChunkResponse(BaseModel):
             document_name=meta.document_name,
             chunk_index=meta.chunk_index,
             page_number=meta.page_number,
+            page_end=meta.page_end,
             slide_number=meta.slide_number,
             section=meta.section,
             heading=meta.heading,
@@ -100,7 +102,6 @@ class RetrieveResponse(BaseModel):
 @router.post("/retrieve", response_model=RetrieveResponse)
 async def retrieve(
     request: RetrieveRequest,
-    settings: SettingsDep,
     correlation_id: CorrelationId = None,
 ) -> RetrieveResponse:
     container = get_container()
@@ -114,8 +115,8 @@ async def retrieve(
             strategy=request.strategy,
             document_ids=request.document_ids,
             top_k=request.top_k,
-            dense_top_k=request.dense_top_k or settings.RETRIEVAL_DENSE_TOP_K,
-            sparse_top_k=request.sparse_top_k or settings.RETRIEVAL_SPARSE_TOP_K,
+            dense_top_k=request.dense_top_k,
+            sparse_top_k=request.sparse_top_k,
         )
     except Exception as exc:
         logger.exception("retrieval failed (correlation_id=%s)", correlation_id)

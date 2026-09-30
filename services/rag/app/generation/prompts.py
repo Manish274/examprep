@@ -28,8 +28,9 @@ Rules, in order of importance:
    nothing else. Do not answer from your own knowledge, even when you are
    confident and even when the question is simple.
 2. Cite the source of each claim inline with its marker, like [S1] or [S2].
-   A sentence carrying a fact needs a marker. Cite only markers that appear in
-   the sources below.
+   A sentence carrying a fact needs a marker. A claim resting on several
+   sources gives each its own brackets: [S1][S3]. Cite only markers that
+   appear in the sources below.
 3. If the sources partly answer the question, answer that part and say plainly
    which part the material does not cover. Do not fill the gap.
 4. A source marked "read from an image" was transcribed from a picture by a
@@ -70,29 +71,34 @@ Be complete but compact -- no preamble, no restating the question, no filler."""
 
 _OVERVIEW = f"""This question is about the material as a whole, and the sources
 below are a spread across all of it rather than passages matched to the
-question.
+question. It is one of two kinds.
 
-Questions like "what is most likely to be tested", "what is the hardest idea"
-or "summarise this" ask you to judge the material, and the material will never
-state the answer outright. That is expected: the judgment is yours to make,
-and making it is the task. Base it on the sources -- what they spend the most
-space on, what they define, list or explain step by step, which part has the
-most moving pieces, what the other parts depend on. Pick one answer, say in a
-sentence what the choice rests on, and present it as a judgment ("the idea
-with the most steps in your notes is..."), not as a certainty.
+A request for the whole -- "summarise this", "what is this about", "what are
+the main topics" -- wants the whole. Go through the material in the order the
+sources give it and cover each part briefly, from its main idea to its key
+facts. Do not single out one part, do not open with a verdict on the
+material, and do not comment on how it is organised.
 
-Then answer it: summarise, explain or list the chosen material from the
-sources. Every fact you mention still needs a citation, and you still may not
-add anything the sources do not say. Do not reply {UNSUPPORTED_TOKEN} to a
+A request for a judgment -- "what is most likely to be tested", "what is the
+hardest idea", "what matters most" -- asks something the material will never
+state outright. That is expected: the judgment is yours to make, and making it
+is the task. Base it on the sources -- what they spend the most space on, what
+they define, list or explain step by step, what the other parts depend on.
+Pick one answer, say in a sentence what the choice rests on, and present it as
+a judgment ("the idea with the most steps in your notes is..."), not as a
+certainty. Then explain the chosen material from the sources.
+
+Either way, every fact you mention still needs a citation, and you still may
+not add anything the sources do not say. Do not reply {UNSUPPORTED_TOKEN} to a
 question like this while there are sources below."""
 
 
 OVERVIEW_RECHECK_NOTE = (
     "The sources above are a spread of the student's whole document. The "
-    "question asks for your judgment about that material, which it will not "
-    "state outright. Make the judgment from the sources, say what it rests "
-    "on, and answer from them with citations. Do not reply "
-    f"{UNSUPPORTED_TOKEN}."
+    "question asks about that material as a whole: summarise it part by "
+    "part, or, if it asks for a judgment the material will not state "
+    "outright, make the judgment from the sources and say what it rests on. "
+    f"Answer from them with citations. Do not reply {UNSUPPORTED_TOKEN}."
 )
 """Appended when a question about the whole document was refused anyway."""
 

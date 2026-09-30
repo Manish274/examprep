@@ -12,12 +12,43 @@ import type { MessageSource } from "@/lib/api";
  * documents a student uploaded -- neither is something to hand to a raw HTML
  * sink, and escaping-then-parsing is more work than simply not doing it.
  *
+ * Models cite in groups as often as singly -- "[S1, S2]", or a run, "[S2-S4]" --
+ * and each marker in a group becomes its own chip.
+ *
  * A marker with no matching source is left as plain text. The pipeline already
  * refuses to invent them, and silently deleting one would hide the case where
  * it did.
  */
 
-const MARKER = /\[(S\d+)\]/g;
+const MARKER = /\[(S\d+(?:\s*[,;\-–]\s*S\d+)*)\]/g;
+const RUN = /^S(\d+)\s*[-–]\s*S(\d+)$/;
+
+// Beyond this a "run" is a malformed marker, not a citation of fifty sources.
+const MAX_RUN = 12;
+
+/** The markers one bracket names: "S1, S3" is S1 and S3; "S2-S4" is S2 to S4. */
+function markersIn(group: string): string[] {
+  const numbers: number[] = [];
+  for (const part of group.split(/\s*[,;]\s*/)) {
+    const run = RUN.exec(part);
+    const from = run ? Number(run[1]) : 0;
+    const to = run ? Number(run[2]) : 0;
+    if (run && to >= from && to - from <= MAX_RUN) {
+      for (let n = from; n <= to; n += 1) numbers.push(n);
+    } else {
+      for (const found of part.matchAll(/S(\d+)/g)) numbers.push(Number(found[1]));
+    }
+  }
+  return [...new Set(numbers)].map((n) => `S${n}`);
+}
+
+/** "p.4", or "pp.4–5" for a passage that runs across a page break. */
+function pages(source: MessageSource): string | null {
+  if (!source.pageNumber) return null;
+  return source.pageEnd
+    ? `pp.${source.pageNumber}–${source.pageEnd}`
+    : `p.${source.pageNumber}`;
+}
 const INLINE = /(\*\*[^*]+\*\*|`[^`]+`|\*[^*\n]+\*)/g;
 
 function inline(text: string, key: string): ReactNode[] {
@@ -64,29 +95,26 @@ function withCitations(
 
   MARKER.lastIndex = 0;
   while ((match = MARKER.exec(text)) !== null) {
-    const marker = match[1]!;
-    const source = sources.find((s) => s.marker === marker);
-
     out.push(...inline(text.slice(last, match.index), `${key}-t${match.index}`));
 
-    if (source) {
-      const where = [
-        source.documentName,
-        source.slideNumber ? `slide ${source.slideNumber}` : null,
-        source.pageNumber ? `p.${source.pageNumber}` : null,
-        source.headingPath?.length ? source.headingPath.join(" › ") : null,
-      ]
-        .filter(Boolean)
-        .join(" · ");
-      out.push(
-        <CitationChip
-          key={`${key}-c${match.index}`}
-          index={marker.slice(1)}
-          source={where}
-        />,
-      );
-    } else {
-      out.push(<Fragment key={`${key}-c${match.index}`}>{match[0]}</Fragment>);
+    for (const marker of markersIn(match[1]!)) {
+      const source = sources.find((s) => s.marker === marker);
+      const chipKey = `${key}-c${match.index}-${marker}`;
+      if (source) {
+        const where = [
+          source.documentName,
+          source.slideNumber ? `slide ${source.slideNumber}` : null,
+          pages(source),
+          source.headingPath?.length ? source.headingPath.join(" › ") : null,
+        ]
+          .filter(Boolean)
+          .join(" · ");
+        out.push(
+          <CitationChip key={chipKey} index={marker.slice(1)} source={where} />,
+        );
+      } else {
+        out.push(<Fragment key={chipKey}>{`[${marker}]`}</Fragment>);
+      }
     }
     last = match.index + match[0].length;
   }
@@ -189,11 +217,7 @@ export function Sources({ sources }: { sources: MessageSource[] }) {
         >
           {[
             source.documentName,
-            source.slideNumber
-              ? `slide ${source.slideNumber}`
-              : source.pageNumber
-                ? `p.${source.pageNumber}`
-                : null,
+            source.slideNumber ? `slide ${source.slideNumber}` : pages(source),
           ]
             .filter(Boolean)
             .join(" · ")}

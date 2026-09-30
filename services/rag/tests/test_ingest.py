@@ -540,6 +540,56 @@ class TestFigures:
         assert again["vision"]["cached"] == 1
         assert get_container().vision.calls == 1  # type: ignore[union-attr]
 
+    async def test_pictures_the_model_could_not_read_are_still_pending(
+        self, vision_client: httpx.AsyncClient
+    ) -> None:
+        # An overloaded model must not cost the document its pictures for
+        # good: what failed is reported as unread, for a later pass to retry.
+        from app.container import get_container
+        from app.vision.providers import VisionUnavailableError
+
+        async def busy(images: object) -> dict[str, str | None]:
+            raise VisionUnavailableError("vision upstream 503")
+
+        get_container().vision.describe = busy  # type: ignore[union-attr]
+        body = (await vision_client.post("/ingest", json=_figures_body("read"))).json()
+
+        assert body["vision"]["failed"] == 1
+        assert body["figures_pending"] == 1
+        assert _sources(body) == {"text"}
+
+    @pytest.mark.parametrize(
+        ("error", "advice"),
+        [
+            ("busy", "in a few minutes"),
+            ("quota", "tomorrow"),
+        ],
+    )
+    async def test_a_scan_no_page_of_which_could_be_read_says_why(
+        self, vision_client: httpx.AsyncClient, error: str, advice: str
+    ) -> None:
+        # A busy model and a spent quota need different advice: one clears in
+        # minutes, the other at the end of the day.
+        from app.container import get_container
+        from app.vision.providers import (
+            VisionQuotaExhaustedError,
+            VisionUnavailableError,
+        )
+
+        async def refuse(images: object) -> dict[str, str | None]:
+            if error == "quota":
+                raise VisionQuotaExhaustedError("vision: daily quota used up")
+            raise VisionUnavailableError("vision upstream 503")
+
+        get_container().vision.describe = refuse  # type: ignore[union-attr]
+        response = await vision_client.post(
+            "/ingest",
+            json=_pdf_body(filename="empty.pdf", storage_key="user-1/empty.pdf"),
+        )
+
+        assert response.status_code == 422
+        assert advice in response.json()["detail"]
+
     async def test_a_scanned_document_is_read_straight_away(
         self, vision_client: httpx.AsyncClient
     ) -> None:

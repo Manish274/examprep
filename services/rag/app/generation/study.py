@@ -19,8 +19,9 @@ from __future__ import annotations
 
 import json
 import logging
+import random
 import re
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -123,19 +124,54 @@ def usable_chunks(
     return usable
 
 
-def spread(chunks: Sequence[Chunk], limit: int) -> list[Chunk]:
+def spread(
+    chunks: Sequence[Chunk], limit: int, *, rng: random.Random | None = None
+) -> list[Chunk]:
     """Takes an evenly spaced sample across the document.
 
     Taking the first N would build an entire test out of the opening pages.
     Even spacing gives coverage of the whole document, which is what a student
     revising for an exam on it actually needs.
+
+    The document is cut into `limit` equal stretches and one chunk taken from
+    each: the first of it, or with `rng` any of it -- still one from every
+    stretch, but a different one each time, so asking again does not hand
+    back the same paper.
     """
     ordered = sorted(chunks, key=lambda c: c.metadata.chunk_index)
     if limit >= len(ordered):
         return ordered
+    if limit <= 0:
+        return []
 
     step = len(ordered) / limit
-    return [ordered[min(int(i * step), len(ordered) - 1)] for i in range(limit)]
+    picked: list[Chunk] = []
+    for i in range(limit):
+        start, end = int(i * step), int((i + 1) * step)
+        picked.append(ordered[rng.randrange(start, end) if rng else start])
+    return picked
+
+
+def pick(
+    pool: Sequence[Chunk],
+    limit: int,
+    *,
+    avoid: Collection[str] = (),
+    rng: random.Random | None = None,
+) -> list[Chunk]:
+    """The passages to write from, favouring ones not used before.
+
+    `avoid` names chunks an earlier quiz or card set on this document already
+    drew on. Without it, a quiz and a set of flashcards made from the same
+    notes ask the same things. Passages already used are fallen back on only
+    when the fresh ones run out, which on a short document they soon do.
+    """
+    fresh = [c for c in pool if c.id not in avoid]
+    if len(fresh) >= limit:
+        return spread(fresh, limit, rng=rng)
+    used = [c for c in pool if c.id in avoid]
+    chosen = fresh + spread(used, limit - len(fresh), rng=rng)
+    return sorted(chosen, key=lambda c: c.metadata.chunk_index)
 
 
 def batches(

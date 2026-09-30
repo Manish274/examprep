@@ -35,7 +35,15 @@ logger = logging.getLogger(__name__)
 # enough that two passages on the same topic still both survive.
 _DUPLICATE_THRESHOLD = 0.85
 
-_MARKER = re.compile(r"\[S(\d+)\]")
+# A citation as models actually write one: "[S1]", and just as often a group
+# -- "[S1, S2]", "[S1; S3]" or a run, "[S2-S4]". Reading only the first form
+# left a grouped citation as raw text and its sources off the answer.
+MARKER_GROUP = re.compile(r"\[(S\d+(?:\s*[,;\-–]\s*S\d+)*)\]")
+_RUN = re.compile(r"S(\d+)\s*[\-–]\s*S(\d+)")
+_NUMBER = re.compile(r"S(\d+)")
+
+# Beyond this a "run" is a malformed marker, not a citation of fifty sources.
+_MAX_RUN = 12
 
 _WORD = re.compile(r"[a-z0-9]+")
 
@@ -86,7 +94,9 @@ def _snippet(text: str, limit: int = 320) -> str:
 def _location(source_meta: ScoredChunk) -> str:
     meta = source_meta.chunk.metadata
     parts = [meta.document_name]
-    if meta.page_number is not None:
+    if meta.page_number is not None and meta.page_end is not None:
+        parts.append(f"pp.{meta.page_number}–{meta.page_end}")
+    elif meta.page_number is not None:
         parts.append(f"p.{meta.page_number}")
     elif meta.slide_number is not None:
         parts.append(f"slide {meta.slide_number}")
@@ -179,15 +189,31 @@ class ContextBuilder:
             document_id=meta.document_id,
             document_name=meta.document_name,
             page_number=meta.page_number,
+            page_end=meta.page_end,
             slide_number=meta.slide_number,
             heading_path=list(meta.heading_path),
             snippet=_snippet(scored.chunk.text),
         )
 
 
+def markers_in(group: str) -> list[str]:
+    """The markers one bracket names, in order: "S1, S3" -> ["S1", "S3"],
+    and "S2-S4" -> ["S2", "S3", "S4"]."""
+    numbers: list[int] = []
+    for part in re.split(r"\s*[,;]\s*", group):
+        run = _RUN.fullmatch(part)
+        if run and 0 <= int(run.group(2)) - int(run.group(1)) <= _MAX_RUN:
+            numbers.extend(range(int(run.group(1)), int(run.group(2)) + 1))
+        else:
+            numbers.extend(int(n) for n in _NUMBER.findall(part))
+    return [f"S{n}" for n in dict.fromkeys(numbers)]
+
+
 def cited_markers(answer: str) -> set[str]:
     """Markers the model actually used, e.g. {"S1", "S3"}."""
-    return {f"S{n}" for n in _MARKER.findall(answer)}
+    return {
+        marker for group in MARKER_GROUP.findall(answer) for marker in markers_in(group)
+    }
 
 
 def verify_citations(

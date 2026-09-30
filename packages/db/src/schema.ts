@@ -174,7 +174,13 @@ export const documents = pgTable(
      * what tells the web app to show that they are on their way.
      */
     figuresPending: integer("figures_pending"),
-    processedAt: timestamp("processed_at", { withTimezone: true }),
+    /**
+     * Images that could still not be read after every retry -- the model
+     * overloaded throughout, or the day's quota spent. Shown on the document,
+     * so a scan missing pages never passes for a complete one.
+     */
+    figuresUnread: integer("figures_unread"),
+    processedAt:timestamp("processed_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -219,6 +225,8 @@ export const documentChunks = pgTable(
 
     // ── preserved metadata, surfaced as citations ──
     pageNumber: integer("page_number"),
+    // The last page, when the chunk crosses a page break.
+    pageEnd: integer("page_end"),
     slideNumber: integer("slide_number"),
     section: text("section"),
     heading: text("heading"),

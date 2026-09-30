@@ -267,6 +267,7 @@ export async function handleChat(
             documentId: s.document_id,
             documentName: s.document_name,
             pageNumber: s.page_number,
+            pageEnd: s.page_end,
             slideNumber: s.slide_number,
             headingPath: s.heading_path,
             snippet: s.snippet,

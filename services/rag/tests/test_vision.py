@@ -19,6 +19,7 @@ from app.embedding.rate_limit import QuotaExhaustedError, RateLimitError
 from app.ingestion.vision_enrichment import (
     batch_images,
     enrich_with_vision,
+    reading_blocks,
     select_images,
 )
 from app.vision.cache import InMemoryVisionCache
@@ -639,3 +640,131 @@ class TestCitationMarking:
 
         assert "read from an image" in context.text
         assert "slide 14" in context.text
+
+
+def _scanned_page(page: int, order: int) -> ExtractedImage:
+    return ExtractedImage(
+        data=b"\xff\xd8-fake",
+        mime_type="image/jpeg",
+        order=order,
+        page_number=page,
+        width=1275,
+        height=1650,
+        content_hash=f"page-{page}",
+        whole_page=True,
+    )
+
+
+class Readings(MockVisionProvider):
+    """Answers every image with the reading scripted for its hash."""
+
+    def __init__(self, readings: dict[str, str]) -> None:
+        super().__init__()
+        self.readings = readings
+
+    async def describe(self, images: Sequence[ExtractedImage]) -> dict[str, str | None]:
+        return {i.content_hash: self.readings[i.content_hash] for i in images}
+
+
+class TestReadingBlocks:
+    def test_a_scanned_page_keeps_its_headings(self) -> None:
+        blocks = reading_blocks(
+            _scanned_page(13, order=5),
+            "# Career in Pharmacy\n"
+            "A pharmacist can work in many fields.\n"
+            "## Industrial Jobs\n"
+            "Figure: A diagram listing Production and Quality Control.",
+        )
+
+        assert [(b.type, b.text) for b in blocks] == [
+            (BlockType.HEADING, "Career in Pharmacy"),
+            (BlockType.FIGURE, "A pharmacist can work in many fields."),
+            (BlockType.HEADING, "Industrial Jobs"),
+            (
+                BlockType.FIGURE,
+                "Figure: A diagram listing Production and Quality Control.",
+            ),
+        ]
+        assert [b.level for b in blocks if b.type is BlockType.HEADING] == [1, 2]
+        # Every block keeps the page's place and says it was read, not lifted.
+        assert {(b.page_number, b.order, b.source) for b in blocks} == {
+            (13, 5, ContentSource.VISION)
+        }
+
+    def test_a_caption_marked_as_a_heading_stays_text(self) -> None:
+        # As a heading it became the section of every page after it.
+        blocks = reading_blocks(
+            _scanned_page(9, order=0),
+            "# Table 1.3: Pharmacy associations\nYEAR | DESCRIPTION\n"
+            "## Figure 2 - Scope of pharmacy",
+        )
+        assert [b.type for b in blocks] == [BlockType.FIGURE]
+        assert blocks[0].text.startswith("Table 1.3: Pharmacy associations")
+
+    def test_a_word_that_merely_starts_like_a_caption_is_a_heading(self) -> None:
+        blocks = reading_blocks(_scanned_page(9, order=0), "## Table view\nText.")
+        assert blocks[0].type is BlockType.HEADING
+
+    def test_a_numbered_heading_takes_its_level_from_its_number(self) -> None:
+        # The model gives the largest line on each page "#", so "1.2.4" on a
+        # page of its own came back as a top-level heading.
+        blocks = reading_blocks(
+            _scanned_page(9, order=0),
+            "# 1.2.4 Pharmaceutical Associations\nText.\n# 1.3. Scope\nMore.",
+        )
+        assert [(b.text, b.level) for b in blocks if b.type is BlockType.HEADING] == [
+            ("1.2.4 Pharmaceutical Associations", 3),
+            ("1.3. Scope", 2),
+        ]
+
+    def test_bold_around_a_heading_is_dropped(self) -> None:
+        blocks = reading_blocks(_scanned_page(2, order=0), "## **Professor**\nTeaches.")
+        assert blocks[0].text == "Professor"
+
+    def test_a_picture_inside_a_page_keeps_its_title_as_text(self) -> None:
+        # A title inside a screenshot must not take over the section the
+        # document's own headings put it in.
+        blocks = reading_blocks(
+            _image(content_hash="shot"), "# Example 3.2\nA | B\n1 | 2"
+        )
+        assert [(b.type, b.text) for b in blocks] == [
+            (BlockType.FIGURE, "Example 3.2\nA | B\n1 | 2")
+        ]
+
+    def test_a_reading_without_headings_is_one_figure(self) -> None:
+        blocks = reading_blocks(_scanned_page(1, order=0), "Line one.\nLine two.")
+        assert [(b.type, b.text) for b in blocks] == [
+            (BlockType.FIGURE, "Line one.\nLine two.")
+        ]
+
+    async def test_a_scan_is_chunked_page_by_page_under_its_headings(self) -> None:
+        from app.chunking.structural import StructuralChunker
+        from app.core.tokenizer import HeuristicTokenCounter
+
+        document = ParsedDocument(
+            document_id="doc-1",
+            filename="scan.pdf",
+            kind=DocumentKind.PDF,
+            images=[_scanned_page(12, order=0), _scanned_page(13, order=1)],
+        )
+        provider = Readings(
+            {
+                "page-12": "# Pharmacy Education\nThe first college opened in Goa.",
+                "page-13": "Industrial jobs include production and quality control.",
+            }
+        )
+        await enrich_with_vision(document, provider, InMemoryVisionCache())
+        chunks = StructuralChunker(counter=HeuristicTokenCounter(), min_tokens=0).chunk(
+            document
+        )
+
+        # Two pages, two chunks: page 13's facts are not cited as page 12.
+        assert [(c.metadata.page_number, c.metadata.page_end) for c in chunks] == [
+            (12, None),
+            (13, None),
+        ]
+        # Page 13 has no heading of its own and continues page 12's section.
+        assert [c.metadata.heading_path for c in chunks] == [
+            ["Pharmacy Education"],
+            ["Pharmacy Education"],
+        ]

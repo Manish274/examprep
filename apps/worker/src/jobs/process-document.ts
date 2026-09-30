@@ -1,6 +1,7 @@
 import type { Job } from "bullmq";
 import type { Redis } from "ioredis";
 import { and, eq, notInArray, sql } from "drizzle-orm";
+import type { PgUpdateSetSource } from "drizzle-orm/pg-core";
 import { documentChunks, documents } from "@examprep/db";
 import {
   documentProcessingJobSchema,
@@ -10,6 +11,7 @@ import {
 import { db } from "../lib/db.js";
 import { logger } from "../lib/logger.js";
 import { publishDocumentProgress } from "../lib/progress.js";
+import { nextFigureStep, scheduleFigureRetry } from "../lib/figure-retries.js";
 import {
   deleteVectors,
   ingest,
@@ -35,6 +37,10 @@ type Report = (progress: JobProgress) => Promise<void>;
  * in it is the slow part, rate limited on a free tier, so it is the second
  * pass, and the student is already studying while it runs.
  *
+ * Images the model could not read -- overloaded, or out of quota -- are not
+ * dropped: a delayed follow-up job tries them again, and if they still cannot
+ * be read the document says how many are missing.
+ *
  * The RAG service parses, chunks, embeds and indexes; the worker owns
  * sequencing, progress and persistence, because Postgres belongs to the Node
  * side.
@@ -49,16 +55,99 @@ export async function processDocument(
   const report: Report = (progress) =>
     publishDocumentProgress(publisher, { documentId, progress });
 
+  // Every pass is traced under the document's id, retries included.
   const pass = (figures: "defer" | "read", onImages: (percent: number) => Promise<void>) =>
     withImageProgress(documentId, onImages, () =>
-      ingest({ ...data, figures }, { correlationId: job.id }),
+      ingest({ ...data, figures }, { correlationId: documentId }),
     );
+
+  if (data.figuresRetry) {
+    await retryFigures(job, data, pass, report, log);
+    return;
+  }
 
   log.info("processing started");
   const text = await indexText(job, data, pass, report, log);
-  if (text && text.figures_pending > 0) {
+  if (!text) return;
+  if ((text.vision.pending ?? 0) > 0) {
+    // Deferred by the text pass, so never tried: read them now.
     await addFigures(job, data, text.figures_pending, pass, report, log);
+  } else if (text.figures_pending > 0) {
+    // Tried by the text pass -- a scan's pages -- and not all read. Not asked
+    // again straight away: the model that just failed them would be asked.
+    await settleFigures(data, text.figures_pending, quotaSpent(text), log);
   }
+}
+
+/** Whether a pass stopped because the model's daily allowance ran out. */
+function quotaSpent(result: IngestResponse): boolean {
+  return (result.vision.skipped_quota ?? 0) > 0;
+}
+
+/**
+ * Records what a pass left unread, and arranges the next try if one is
+ * worth making.
+ *
+ * figuresPending stays set while a try is scheduled, so the web app shows the
+ * figures as still on their way; figuresUnread is set only once no try
+ * remains, and is what tells the student pages are missing.
+ */
+async function settleFigures(
+  data: DocumentProcessingJob,
+  unread: number,
+  spent: boolean,
+  log: Log,
+  fields: PgUpdateSetSource<typeof documents> = {},
+): Promise<void> {
+  const step = nextFigureStep(unread, spent, data.figuresRetry ?? 0);
+
+  if (step.kind === "retry") {
+    await scheduleFigureRetry(data, step.attempt, step.delayMs);
+    log.info(
+      { unread, attempt: step.attempt, delayMs: step.delayMs },
+      "unread images will be tried again",
+    );
+  } else if (step.kind === "unread") {
+    log.warn({ unread, quotaSpent: spent }, "images left unread");
+  }
+
+  await db()
+    .update(documents)
+    .set({
+      ...fields,
+      figuresPending: step.kind === "retry" ? unread : null,
+      figuresUnread: step.kind === "unread" ? step.count : null,
+      updatedAt: new Date(),
+    })
+    .where(eq(documents.id, data.documentId));
+}
+
+/**
+ * A delayed follow-up: the document is ready, and only the images an earlier
+ * pass could not read are left.
+ */
+async function retryFigures(
+  job: Job<DocumentProcessingJob>,
+  data: DocumentProcessingJob,
+  pass: Pass,
+  report: Report,
+  log: Log,
+): Promise<void> {
+  const [row] = await db()
+    .select({ status: documents.status, pending: documents.figuresPending })
+    .from(documents)
+    .where(eq(documents.id, data.documentId))
+    .limit(1);
+
+  // Removed in the meantime -- the visit ended, or the student deleted it --
+  // or already settled some other way: nothing is waiting on this try.
+  if (!row || row.status !== "ready" || !row.pending) {
+    log.info({ retry: data.figuresRetry }, "figure retry no longer needed");
+    return;
+  }
+
+  log.info({ retry: data.figuresRetry, pending: row.pending }, "retrying unread images");
+  await addFigures(job, data, row.pending, pass, report, log);
 }
 
 type Pass = (
@@ -148,18 +237,20 @@ async function indexText(
  * The second pass: reads the images the first left, and swaps in the chunks
  * they change.
  *
- * The document is ready throughout, so a failure here costs only its figures.
- * It is logged and recorded on the document -- never turned into a failed
- * document, nor into a retry that would redo the text pass.
+ * The document is ready throughout, so a failure here costs only its figures,
+ * and only for now: whatever is still unread afterwards is tried again later.
+ * It is never turned into a failed document, nor into a BullMQ retry that
+ * would redo the text pass.
  */
 async function addFigures(
   job: Job<DocumentProcessingJob>,
-  { documentId, userId }: DocumentProcessingJob,
+  data: DocumentProcessingJob,
   pending: number,
   pass: Pass,
   report: Report,
   log: Log,
 ): Promise<void> {
+  const { documentId, userId } = data;
   await report({
     stage: "figures",
     message: `Reading ${pending} image${pending === 1 ? "" : "s"}`,
@@ -174,26 +265,17 @@ async function addFigures(
     if (!(await stillWanted(job, documentId, userId, log))) return;
 
     await storeChunks(documentId, userId, result.chunks);
-    await db()
-      .update(documents)
-      .set({
-        chunkCount: result.chunk_count,
-        processingMeta: processingMeta(result),
-        figuresPending: null,
-        updatedAt: new Date(),
-      })
-      .where(eq(documents.id, documentId));
+    await settleFigures(data, result.figures_pending, quotaSpent(result), log, {
+      chunkCount: result.chunk_count,
+      processingMeta: processingMeta(result),
+    });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     log.warn({ err: message }, "figures could not be added");
-    await db()
-      .update(documents)
-      .set({
-        figuresPending: null,
-        processingMeta: sql`coalesce(${documents.processingMeta}, '{}'::jsonb) || ${JSON.stringify({ figuresError: message.slice(0, 500) })}::jsonb`,
-        updatedAt: new Date(),
-      })
-      .where(eq(documents.id, documentId));
+    // Nothing was read, so everything this pass wanted is still unread.
+    await settleFigures(data, pending, false, log, {
+      processingMeta: sql`coalesce(${documents.processingMeta}, '{}'::jsonb) || ${JSON.stringify({ figuresError: message.slice(0, 500) })}::jsonb`,
+    });
   }
 
   // Sent either way, so the web app re-reads the row and stops showing the
@@ -273,6 +355,7 @@ async function storeChunks(
             tokenCount: chunk.token_count,
             contentHash: chunk.content_hash,
             pageNumber: chunk.page_number,
+            pageEnd: chunk.page_end,
             slideNumber: chunk.slide_number,
             section: chunk.section,
             heading: chunk.heading,
@@ -287,6 +370,7 @@ async function storeChunks(
           set: {
             chunkIndex: sql`excluded.chunk_index`,
             pageNumber: sql`excluded.page_number`,
+            pageEnd: sql`excluded.page_end`,
             slideNumber: sql`excluded.slide_number`,
             section: sql`excluded.section`,
             heading: sql`excluded.heading`,

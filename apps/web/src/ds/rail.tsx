@@ -157,7 +157,7 @@ export function RailSection({
           padding: "0 10px",
           height: 28,
           fontSize: "var(--caps-size)",
-          fontWeight: "var(--weight-medium)",
+          fontWeight: "var(--caps-weight)",
           letterSpacing: "var(--caps-track)",
           textTransform: "uppercase",
           color: "var(--text)",

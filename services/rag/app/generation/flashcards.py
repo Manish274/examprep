@@ -14,7 +14,8 @@ thing, and traceability is what makes that checkable.
 from __future__ import annotations
 
 import logging
-from collections.abc import Sequence
+import random
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass, field
 
 from app.core.interfaces import LLMProvider
@@ -25,8 +26,8 @@ from app.generation.study import (
     batches,
     messages,
     parse_json_items,
+    pick,
     resolve_source,
-    spread,
     usable_chunks,
 )
 
@@ -97,16 +98,22 @@ class FlashcardGenerationResult:
 
 class FlashcardGenerator:
     def __init__(
-        self, llm: LLMProvider, *, batch_size: int = DEFAULT_BATCH_SIZE
+        self,
+        llm: LLMProvider,
+        *,
+        batch_size: int = DEFAULT_BATCH_SIZE,
+        rng: random.Random | None = None,
     ) -> None:
         self._llm = llm
         self._batch_size = batch_size
+        self._rng = rng or random.Random()
 
     async def generate(
         self,
         chunks: Sequence[Chunk],
         *,
         card_count: int = 20,
+        avoid: Collection[str] = (),
     ) -> FlashcardGenerationResult:
         result = FlashcardGenerationResult()
 
@@ -114,7 +121,7 @@ class FlashcardGenerator:
         if not pool:
             return result
 
-        sampled = spread(pool, min(card_count, len(pool)))
+        sampled = pick(pool, min(card_count, len(pool)), avoid=avoid, rng=self._rng)
         grouped = batches(sampled, self._batch_size)
 
         seen_fronts: set[str] = set()

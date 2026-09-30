@@ -137,6 +137,7 @@ export const chatRoutes = new Hono<AppEnv>()
             documentId: documentChunks.documentId,
             documentName: documents.filename,
             pageNumber: documentChunks.pageNumber,
+            pageEnd: documentChunks.pageEnd,
             slideNumber: documentChunks.slideNumber,
             headingPath: documentChunks.headingPath,
             snippet: documentChunks.text,

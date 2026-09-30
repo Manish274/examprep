@@ -9,11 +9,13 @@ not extracted twice.
 from __future__ import annotations
 
 import asyncio
+import io
 import logging
 from itertools import pairwise
 from pathlib import Path
 
 import fitz  # PyMuPDF
+from PIL import Image
 
 from app.core.models import (
     BlockType,
@@ -50,6 +52,27 @@ _RENDER_DPI = 150
 
 # High enough that small print survives: legibility is accuracy here.
 _JPEG_QUALITY = 88
+
+# Share of a page covered by raster images above which it is treated as a
+# photograph -- a scan -- and rendered as JPEG.
+_PHOTOGRAPHIC_COVERAGE = 0.5
+
+
+def _is_photographic(page: fitz.Page) -> bool:
+    """Whether the page is mostly raster image: a scan or a photograph.
+
+    Such a page is continuous tone, where JPEG is a fraction of PNG's size. A
+    page drawn in vectors is flat colour, where PNG is both smaller and
+    sharper. Deciding up front means encoding once; encoding both and keeping
+    the smaller used to cost over a second per ten pages.
+    """
+    area = float(abs(page.rect))
+    if area <= 0:
+        return False
+    covered = 0.0
+    for info in page.get_image_info():
+        covered += float(abs(fitz.Rect(info["bbox"]) & page.rect))
+    return covered / area >= _PHOTOGRAPHIC_COVERAGE
 
 
 def _extract_page_images(
@@ -99,22 +122,28 @@ def _render_page(
     page itself. Without this a scanned PDF is simply unusable, which is the
     single most common complaint about document RAG.
 
-    Encoded as whichever of PNG and JPEG is smaller. A photographed or scanned
-    page is a photograph, and as PNG it runs to megabytes -- several of them
-    to a vision request add up to the size limit. A page of flat vector
-    drawing is the reverse, and PNG wins.
+    A photographed or scanned page is encoded as JPEG: as PNG it runs to
+    megabytes, and several of them to a vision request add up to the size
+    limit. A page of flat vector drawing is the reverse, and stays PNG.
     """
     try:
         pixmap = page.get_pixmap(dpi=_RENDER_DPI)
-        png = pixmap.tobytes("png")
-        jpeg = pixmap.tobytes("jpg", jpg_quality=_JPEG_QUALITY)
+        if _is_photographic(page):
+            # Encoded by Pillow rather than PyMuPDF: the same quality, from
+            # libjpeg-turbo, in about a ninth of the time.
+            buffer = io.BytesIO()
+            Image.frombytes("RGB", (pixmap.width, pixmap.height), pixmap.samples).save(
+                buffer, "JPEG", quality=_JPEG_QUALITY
+            )
+            blob = buffer.getvalue()
+            mime_type = "image/jpeg"
+        else:
+            blob = pixmap.tobytes("png")
+            mime_type = "image/png"
     except Exception as exc:
         logger.debug("could not render page %s: %s", page_number, exc)
         return None
 
-    blob, mime_type = (
-        (jpeg, "image/jpeg") if len(jpeg) < len(png) else (png, "image/png")
-    )
     return ExtractedImage(
         data=blob,
         mime_type=mime_type,
@@ -123,6 +152,7 @@ def _render_page(
         width=pixmap.width,
         height=pixmap.height,
         content_hash=content_hash(blob.hex()),
+        whole_page=True,
     )
 
 
@@ -167,8 +197,19 @@ def _extract_page(
     table_blocks: list[ParsedBlock] = []
     table_rects: list[tuple[float, float, float, float]] = []
 
+    text_page = page.get_text("dict")
+    # A table is read from the text layer, so a page without one -- a scan --
+    # has none to find, and looking costs time on every page.
+    has_text = any(
+        span.get("text", "").strip()
+        for block in text_page.get("blocks", [])
+        if block.get("type") == 0
+        for line in block.get("lines", [])
+        for span in line.get("spans", [])
+    )
+
     try:
-        for table in page.find_tables().tables:
+        for table in page.find_tables().tables if has_text else []:
             rows = table.extract()
             text = normalize(_table_to_text(rows))
             rect = (
@@ -192,7 +233,6 @@ def _extract_page(
         logger.debug("table extraction failed on page %s: %s", page_number, exc)
 
     lines: list[LineRecord] = []
-    text_page = page.get_text("dict")
     for block in text_page.get("blocks", []):
         if block.get("type") != 0:  # 0 is text; 1 is an image
             continue

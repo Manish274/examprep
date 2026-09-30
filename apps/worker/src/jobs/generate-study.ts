@@ -1,6 +1,6 @@
 import type { Job } from "bullmq";
 import type { Redis } from "ioredis";
-import { eq } from "drizzle-orm";
+import { and, eq, isNotNull, ne, sql } from "drizzle-orm";
 import {
   flashcardSets,
   flashcards,
@@ -20,6 +20,48 @@ import {
   generateTest,
   RagPermanentError,
 } from "../lib/rag-client.js";
+
+/**
+ * The chunks earlier quizzes and card sets on this document were written
+ * from, so the next one is written from the rest first. Without it a quiz and
+ * a set of flashcards on the same notes ask the same things.
+ */
+async function chunksAlreadyUsed(
+  documentId: string,
+  targetId: string,
+): Promise<string[]> {
+  const [fromTests, fromCards] = await Promise.all([
+    db()
+      .selectDistinct({ id: testQuestions.sourceChunkId })
+      .from(testQuestions)
+      .innerJoin(tests, eq(tests.id, testQuestions.testId))
+      .where(
+        and(
+          eq(tests.documentId, documentId),
+          ne(tests.id, targetId),
+          isNotNull(testQuestions.sourceChunkId),
+        ),
+      ),
+    db()
+      .selectDistinct({ id: flashcards.sourceChunkId })
+      .from(flashcards)
+      .innerJoin(flashcardSets, eq(flashcardSets.id, flashcards.setId))
+      .where(
+        and(
+          eq(flashcardSets.documentId, documentId),
+          ne(flashcardSets.id, targetId),
+          isNotNull(flashcards.sourceChunkId),
+        ),
+      ),
+  ]);
+  return [
+    ...new Set(
+      [...fromTests, ...fromCards]
+        .map((row) => row.id)
+        .filter((id): id is string => id !== null),
+    ),
+  ];
+}
 
 /**
  * Generates a test or a flashcard set.
@@ -73,6 +115,11 @@ export async function generateStudyMaterial(
       .where(eq(table.id, targetId));
     await publish("generating", 0);
 
+    const avoidChunkIds = await chunksAlreadyUsed(documentId, targetId);
+    // Traces are filed under the test or set id, so "what happened when this
+    // quiz was made" is one lookup by an id the app already has.
+    const trace = { correlationId: targetId };
+
     if (kind === "test") {
       const result = await generateTest(
         {
@@ -81,8 +128,9 @@ export async function generateStudyMaterial(
           questionCount: count,
           types: questionTypes,
           difficulty,
+          avoidChunkIds,
         },
-        { correlationId: job.id },
+        trace,
       );
 
       // Replace rather than append: a retried job must not double the paper.
@@ -109,7 +157,12 @@ export async function generateStudyMaterial(
           status: "ready",
           questionCount: result.questions.length,
           errorMessage: null,
-          config: { requested: count, ...result.stats },
+          // Merged in under its own key: the settings the student chose --
+          // difficulty, question types -- are part of the test's record and
+          // must survive it being generated.
+          config: sql`coalesce(${tests.config}, '{}'::jsonb) || ${JSON.stringify({
+            generation: { requested: count, ...result.stats },
+          })}::jsonb`,
           updatedAt: new Date(),
         })
         .where(eq(tests.id, targetId));
@@ -120,8 +173,8 @@ export async function generateStudyMaterial(
     }
 
     const result = await generateFlashcards(
-      { userId, documentIds: [documentId], cardCount: count },
-      { correlationId: job.id },
+      { userId, documentIds: [documentId], cardCount: count, avoidChunkIds },
+      trace,
     );
 
     await db().delete(flashcards).where(eq(flashcards.setId, targetId));

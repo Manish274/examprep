@@ -19,6 +19,8 @@ export const sourceSchema = z.object({
   documentId: uuidSchema,
   documentName: z.string(),
   pageNumber: z.number().int().positive().nullable(),
+  /** Set when the passage runs past pageNumber on to a later page. */
+  pageEnd: z.number().int().positive().nullable(),
   slideNumber: z.number().int().positive().nullable(),
   headingPath: z.array(z.string()).default([]),
   snippet: z.string(),

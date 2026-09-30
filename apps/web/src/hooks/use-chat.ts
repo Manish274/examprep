@@ -38,7 +38,9 @@ export type ChatStage = "searching" | "writing" | "rechecking";
 
 export function useChat() {
   const { send, ready } = useSocket();
-  const [sessions, setSessions] = useState<ChatSessionRow[]>([]);
+  // Null until the list has loaded: an outage must not read as "no chats".
+  const [sessions, setSessions] = useState<ChatSessionRow[] | null>(null);
+  const [sessionFailures, setSessionFailures] = useState(0);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [turns, setTurns] = useState<Turn[]>([]);
   const [streaming, setStreaming] = useState(false);
@@ -54,6 +56,7 @@ export function useChat() {
       setSessions(rows.filter((row) => row.title));
       return rows;
     } catch {
+      setSessionFailures((count) => count + 1);
       return [];
     }
   }, []);
@@ -64,6 +67,13 @@ export function useChat() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void refreshSessions();
   }, [refreshSessions]);
+
+  // Asked for again until it loads, as the document list is.
+  useEffect(() => {
+    if (sessions !== null || sessionFailures === 0) return;
+    const timer = window.setTimeout(() => void refreshSessions(), 5000);
+    return () => window.clearTimeout(timer);
+  }, [sessions, sessionFailures, refreshSessions]);
 
   const open = useCallback(async (id: string) => {
     setSessionId(id);

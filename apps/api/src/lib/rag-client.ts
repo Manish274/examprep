@@ -8,7 +8,6 @@ import { upstreamFailure } from "./errors.js";
  */
 export interface RagRequestOptions {
   correlationId?: string;
-  signal?: AbortSignal;
   timeoutMs?: number;
 }
 
@@ -24,11 +23,6 @@ async function ragFetch<T>(
   const timer = setTimeout(() => {
     controller.abort();
   }, timeoutMs);
-  if (options.signal) {
-    options.signal.addEventListener("abort", () => {
-      controller.abort();
-    });
-  }
 
   try {
     const res = await fetch(new URL(path, RAG_SERVICE_URL), {
@@ -106,6 +100,8 @@ export interface ChatSource {
   document_id: string;
   document_name: string;
   page_number: number | null;
+  /** Last page, when the passage crosses a page break. */
+  page_end: number | null;
   slide_number: number | null;
   heading_path: string[];
   snippet: string;
@@ -252,12 +248,13 @@ export interface GradedAnswer {
  * is generous but far below the generation ceiling.
  */
 export const gradeAnswers = (
+  userId: string,
   answers: GradableAnswerInput[],
   options: RagRequestOptions = {},
 ): Promise<{ graded: GradedAnswer[]; score: number; max_score: number }> =>
   ragFetch(
     "/grade",
-    { method: "POST", body: JSON.stringify({ answers }) },
+    { method: "POST", body: JSON.stringify({ user_id: userId, answers }) },
     { timeoutMs: 180_000, ...options },
   );
 
@@ -277,6 +274,7 @@ export interface RagRetrievedChunk {
   document_name: string;
   chunk_index: number;
   page_number: number | null;
+  page_end: number | null;
   slide_number: number | null;
   heading: string | null;
   heading_path: string[];

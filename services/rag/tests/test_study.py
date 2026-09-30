@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import random
 from typing import ClassVar
 
 import pytest
@@ -18,6 +19,7 @@ from app.generation.llm import MockLLMProvider
 from app.generation.study import (
     batches,
     parse_json_items,
+    pick,
     resolve_source,
     spread,
     usable_chunks,
@@ -721,3 +723,39 @@ class TestWrittenGrading:
         graded = await Grader(llm).grade([objective, written])
 
         assert [g.question_id for g in graded] == ["q1", "q2"]
+
+
+class TestVariedSampling:
+    def test_every_stretch_of_the_document_is_still_covered(self) -> None:
+        picked = spread([_chunk(i) for i in range(100)], 10, rng=random.Random(7))
+
+        assert [c.metadata.chunk_index // 10 for c in picked] == list(range(10))
+
+    def test_asking_again_picks_different_passages(self) -> None:
+        chunks = [_chunk(i) for i in range(100)]
+        first = [c.id for c in spread(chunks, 10, rng=random.Random(1))]
+        second = [c.id for c in spread(chunks, 10, rng=random.Random(2))]
+
+        assert first != second
+
+    def test_without_randomness_the_choice_is_repeatable(self) -> None:
+        chunks = [_chunk(i) for i in range(100)]
+        assert spread(chunks, 10) == spread(chunks, 10)
+
+    def test_passages_used_before_are_left_for_last(self) -> None:
+        pool = [_chunk(i) for i in range(20)]
+        used = {f"chunk-{i}" for i in range(10)}
+        picked = pick(pool, 5, avoid=used, rng=random.Random(3))
+
+        assert len(picked) == 5
+        assert all(c.id not in used for c in picked)
+
+    def test_used_passages_fill_in_once_fresh_ones_run_out(self) -> None:
+        pool = [_chunk(i) for i in range(10)]
+        used = {f"chunk-{i}" for i in range(8)}
+        picked = pick(pool, 5, avoid=used, rng=random.Random(3))
+        indexes = [c.metadata.chunk_index for c in picked]
+
+        assert {8, 9} <= set(indexes)
+        assert len(set(indexes)) == 5
+        assert indexes == sorted(indexes)

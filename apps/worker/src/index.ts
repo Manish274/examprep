@@ -12,6 +12,7 @@ import { logger } from "./lib/logger.js";
 import { closeDb } from "./lib/db.js";
 import { createQueueConnection } from "./lib/connection.js";
 import { processDocument } from "./jobs/process-document.js";
+import { closeFigureRetries } from "./lib/figure-retries.js";
 import { generateStudyMaterial } from "./jobs/generate-study.js";
 
 const env = loadEnv();
@@ -28,8 +29,10 @@ const documentWorker = new Worker<DocumentProcessingJob>(
   {
     connection: documentConnection,
     concurrency: env.WORKER_CONCURRENCY,
-    // Ingestion is bound by provider quotas, not by CPU. Limiting jobs here
-    // keeps the whole system under the free-tier ceiling.
+    // Only how many ingestions may start per second, which smooths a burst
+    // of uploads. It is not what keeps the system inside the free tier: the
+    // provider limits are enforced where the calls are made, by the RAG
+    // service's rate limiters and its stop when a daily quota runs out.
     limiter: { max: env.WORKER_CONCURRENCY, duration: 1_000 },
   },
 );
@@ -73,6 +76,7 @@ async function shutdown(signal: string): Promise<void> {
     documentConnection.quit(),
     studyConnection.quit(),
     publisher.quit(),
+    closeFigureRetries(),
     closeDb(),
   ]);
   process.exit(0);

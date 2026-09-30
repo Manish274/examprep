@@ -14,7 +14,8 @@ a supplied chunk is discarded rather than shown.
 from __future__ import annotations
 
 import logging
-from collections.abc import Sequence
+import random
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -25,8 +26,8 @@ from app.generation.study import (
     batches,
     messages,
     parse_json_items,
+    pick,
     resolve_source,
-    spread,
     usable_chunks,
 )
 
@@ -200,10 +201,15 @@ def _to_question(
 
 class ExamGenerator:
     def __init__(
-        self, llm: LLMProvider, *, batch_size: int = DEFAULT_BATCH_SIZE
+        self,
+        llm: LLMProvider,
+        *,
+        batch_size: int = DEFAULT_BATCH_SIZE,
+        rng: random.Random | None = None,
     ) -> None:
         self._llm = llm
         self._batch_size = batch_size
+        self._rng = rng or random.Random()
 
     async def generate(
         self,
@@ -212,6 +218,7 @@ class ExamGenerator:
         question_count: int = 10,
         types: Sequence[QuestionType] | None = None,
         difficulty: str = "mixed",
+        avoid: Collection[str] = (),
     ) -> ExamGenerationResult:
         wanted = list(types or [QuestionType.MCQ, QuestionType.SHORT_ANSWER])
         result = ExamGenerationResult()
@@ -222,7 +229,9 @@ class ExamGenerator:
 
         # Sample roughly two chunks per question so the model has material to
         # choose from and can skip passages carrying nothing examinable.
-        sampled = spread(pool, min(question_count * 2, len(pool)))
+        sampled = pick(
+            pool, min(question_count * 2, len(pool)), avoid=avoid, rng=self._rng
+        )
         grouped = batches(sampled, self._batch_size)
         per_batch = max(1, -(-question_count // max(len(grouped), 1)))
 

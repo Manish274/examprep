@@ -262,7 +262,7 @@ class ChatService:
         async with span(
             "condense", question=request.question, turns=len(history)
         ) as observed:
-            if not needs_context(request.question):
+            if not needs_context(request.question, history):
                 observed.output(rewritten=request.question, skipped=True)
                 return request.question
 
@@ -400,9 +400,7 @@ class ChatService:
         timings["retrieved"] = len(chosen)
         return context, query, timings, Evidence(whole_document=True)
 
-    def _no_answer(
-        self, query: str, timings: dict[str, int], evidence: Evidence
-    ) -> ChatResult:
+    def _no_answer(self, query: str, timings: dict[str, int]) -> ChatResult:
         """The reply when the model is not asked at all.
 
         Either nothing was retrieved, or what was retrieved is plainly about
@@ -465,17 +463,11 @@ class ChatService:
         query: str,
         timings: dict[str, int],
     ) -> ChatResult:
-        """Turns raw model output into a verified, citable answer."""
-        if is_refusal(raw):
-            return ChatResult(
-                text=UNSUPPORTED_REPLY,
-                sources=[],
-                unsupported=True,
-                rewritten_query=query,
-                retrieved=timings.get("retrieved", 0),
-                timings=timings,
-            )
+        """Turns raw model output into a verified, citable answer.
 
+        Only ever given an answer: a refusal is caught while it streams, and
+        never reaches here.
+        """
         resolved, dangling = verify_citations(raw, context.sources)
         return ChatResult(
             text=raw,
@@ -550,7 +542,7 @@ class ChatService:
 
         if context.is_empty or self._off_topic(evidence):
             yield "token", NO_CONTEXT_REPLY
-            yield "done", self._no_answer(query, timings, evidence)
+            yield "done", self._no_answer(query, timings)
             return
 
         yield "stage", {"stage": "writing", "passages": len(context.sources)}

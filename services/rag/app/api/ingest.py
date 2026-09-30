@@ -67,6 +67,7 @@ class ChunkResponse(BaseModel):
     token_count: int
     chunk_index: int
     page_number: int | None
+    page_end: int | None
     slide_number: int | None
     section: str | None
     heading: str | None
@@ -87,6 +88,7 @@ class ChunkResponse(BaseModel):
             token_count=chunk.token_count,
             chunk_index=meta.chunk_index,
             page_number=meta.page_number,
+            page_end=meta.page_end,
             slide_number=meta.slide_number,
             section=meta.section,
             heading=meta.heading,
@@ -108,7 +110,8 @@ class IngestResponse(BaseModel):
     indexed: int
     cache_hits: int
     vision: dict[str, int]
-    # Images a "defer" pass left unread. Zero means the document is complete.
+    # Images still unread: left by a "defer" pass, or tried and not read (an
+    # overloaded model, a spent quota). Zero means the document is complete.
     figures_pending: int
     # Chunks whose text was byte-identical to an earlier one and were dropped.
     # A high count on a deck usually means repeated title or build-up slides.
@@ -304,6 +307,7 @@ async def preview(
                 "index": c.metadata.chunk_index,
                 "tokens": c.token_count,
                 "page": c.metadata.page_number,
+                "page_end": c.metadata.page_end,
                 "slide": c.metadata.slide_number,
                 "heading_path": c.metadata.heading_path,
                 "source": c.metadata.source.value,

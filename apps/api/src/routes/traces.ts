@@ -72,10 +72,12 @@ export const traceRoutes = new Hono<AppEnv>()
   /**
    * One operation, span by span.
    *
-   * The correlation id is the assistant message id, so this is the direct
-   * answer to "what happened when that answer was produced" -- what the
-   * question was rewritten to, what came back and in what order, what the
-   * reranker moved, and which sources the model actually cited.
+   * The correlation id is the id of the thing produced: the assistant
+   * message, so this is the direct answer to "what happened when that answer
+   * was produced" -- what the question was rewritten to, what came back and
+   * in what order, what the reranker moved, and which sources the model
+   * actually cited. Likewise the document for an ingest, the test or
+   * flashcard set for a generation, and the attempt for a grading.
    */
   .get("/:id", validate("param", correlationParamSchema), async (c) => {
     const correlationId = c.req.valid("param").id;

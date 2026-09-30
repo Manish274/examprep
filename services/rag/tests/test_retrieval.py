@@ -341,6 +341,29 @@ class TestStoreMaintenance:
             await store.upsert_chunks(chunks, [[0.0] * DIMENSIONS], [], user_id=ALICE)
 
 
+class TestSampling:
+    async def test_reads_the_whole_scope_across_scroll_pages(
+        self, service, monkeypatch
+    ) -> None:
+        # One page of a scroll is an arbitrary corner of the document -- the
+        # same corner every time -- so the whole scope is paged through.
+        import app.retrieval.qdrant_store as module
+
+        monkeypatch.setattr(module, "_SCROLL_PAGE", 2)
+        _, store, chunks = service
+        sampled = await store.sample_chunks(user_id=ALICE, limit=1000)
+
+        assert sorted(c.id for c in sampled) == sorted(c.id for c in chunks)
+
+    async def test_a_small_sample_is_spread_in_reading_order(self, service) -> None:
+        _, store, chunks = service
+        sampled = await store.sample_chunks(user_id=ALICE, limit=3)
+        keys = [(c.metadata.document_id, c.metadata.chunk_index) for c in sampled]
+
+        assert len(set(keys)) == 3
+        assert keys == sorted(keys)
+
+
 class TestCollectionSchema:
     async def test_dimension_mismatch_is_refused(self, service) -> None:
         # Indexing 3072-wide vectors into a 256-wide collection would fail per

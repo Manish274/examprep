@@ -135,12 +135,6 @@ class EvaluationReport:
     k_values: list[int]
     config: dict[str, object] = field(default_factory=dict)
 
-    def best_by(self, metric: str) -> StrategyResult | None:
-        ranked = [s for s in self.strategies if metric in s.metrics]
-        if not ranked:
-            return None
-        return max(ranked, key=lambda s: s.metrics[metric])
-
     def significance(
         self,
         baseline: str = "hybrid_rerank",

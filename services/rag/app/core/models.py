@@ -108,6 +108,9 @@ class ExtractedImage(BaseModel):
     # Nearby text, given to the vision model so it can tell a decorative logo
     # from a diagram the surrounding slide is explaining.
     context_hint: str = ""
+    # A scanned page rendered whole, rather than a picture sitting on a page.
+    # Such a reading is the page's only content, headings included.
+    whole_page: bool = False
 
     @property
     def pixels(self) -> int:
@@ -134,6 +137,9 @@ class ChunkMetadata(BaseModel):
     document_name: str
     chunk_index: int
     page_number: int | None = None
+    # The last page the chunk runs on to, when it crosses a page break; None
+    # when it sits on page_number alone.
+    page_end: int | None = None
     slide_number: int | None = None
     section: str | None = None
     heading: str | None = None
@@ -219,17 +225,7 @@ class Source(BaseModel):
     document_id: str
     document_name: str
     page_number: int | None = None
+    page_end: int | None = None
     slide_number: int | None = None
     heading_path: list[str] = Field(default_factory=list)
     snippet: str
-
-
-class GroundedAnswer(BaseModel):
-    """The contract every generation path returns, chat and study tools alike."""
-
-    text: str
-    sources: list[Source] = Field(default_factory=list)
-    # True when retrieval found nothing that supports an answer. The system
-    # says so plainly rather than filling the gap from model priors.
-    unsupported: bool = False
-    usage: LLMUsage = Field(default_factory=LLMUsage)

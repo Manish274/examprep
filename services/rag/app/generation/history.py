@@ -31,8 +31,9 @@ from dataclasses import dataclass
 
 from app.core.tokenizer import TokenCounter, get_token_counter
 
-# "[S1]", "[S12]" -- the citation markers the pipeline itself emits.
-_MARKER = re.compile(r"\[S\d+\]")
+# "[S1]", "[S1, S2]" -- the citation markers the pipeline itself emits.
+from app.generation.context import MARKER_GROUP as _MARKER
+
 # Two or more blank lines left behind after stripping markers mid-paragraph.
 _GAPS = re.compile(r"[ \t]{2,}")
 
@@ -62,8 +63,26 @@ _FILLER = frozenset(
     s t d m ll re ve don doesn didn isn aren wasn weren""".split()
 )
 
-# A follow-up with fewer subject words than this is rewritten regardless.
-# "What are the advantages?" names nothing on its own.
+# Words that ask for an aspect of something without naming the something:
+# "what are the advantages?", "give an example", "explain the working".
+_ASPECT = frozenset(
+    """advantage advantages disadvantage disadvantages benefit benefits drawback
+    drawbacks limitation limitations pro pros con cons type types kind kinds
+    example examples instance step steps stage stages phase phases use uses
+    usage application applications feature features property properties
+    characteristic characteristics difference differences similarity
+    similarities cause causes effect effects importance purpose meaning
+    definition significance role roles function functions component components
+    part parts process method methods rule rules reason reasons working works
+    work detail details point points summary history formula formulas equation
+    value values impact result results problem problems solution solutions idea
+    ideas concept concepts topic topics main key first second third last next
+    simply simple simpler briefly brief short detailed further better clearly
+    words terms mean means""".split()
+)
+
+# A follow-up naming at least this many subject words stands alone whatever
+# the conversation was about.
 MIN_STANDALONE_WORDS = 5
 
 
@@ -136,18 +155,29 @@ def prepare(
     return kept
 
 
-def needs_context(question: str) -> bool:
+def _stem(word: str) -> str:
+    """Crude plural folding, so "colleges" in a question meets "college" in
+    the answer before it."""
+    return word[:-1] if len(word) > 3 and word.endswith("s") else word
+
+
+def needs_context(question: str, history: Sequence[tuple[str, str]] = ()) -> bool:
     """Whether a follow-up depends on the turns before it.
 
     Deciding this locally skips the rewrite for a question that already stands
-    alone. The rewrite is a model call on the same small daily quota the
-    vision stage reads slides with, and it adds most of a second to every
-    follow-up.
+    alone. The rewrite is a call on the utility model's small daily quota, and
+    it adds a second or more to every follow-up it runs on.
 
-    Deliberately biased toward rewriting. A question that needed rewriting and
-    did not get one retrieves worse; a question rewritten needlessly only costs
-    the call. So any referring word, any continuing opening, or too few subject
-    words means the rewrite still runs.
+    Biased toward rewriting, because the two mistakes are not equal: a
+    question that needed rewriting and did not get one retrieves worse, while
+    one rewritten needlessly only costs the call. So the rewrite runs on any
+    referring word ("how does *it* work"), any continuing opening ("and
+    then?"), and any question that names only an aspect ("what are the
+    advantages?"). A short question that names a subject runs it only when the
+    subject is what the conversation was already about: "when was the college
+    founded?" after an answer about a college means that college, while "what
+    is Pharmakon?" after an answer about something else means just what it
+    says.
     """
     text = question.strip().lower()
     words = _WORD.findall(text)
@@ -158,4 +188,16 @@ def needs_context(question: str) -> bool:
         return True
 
     subject = [word for word in words if word not in _FILLER]
-    return len(subject) < MIN_STANDALONE_WORDS
+    named = [word for word in subject if word not in _ASPECT and not word.isdigit()]
+    if not named:
+        return True
+    if len(subject) >= MIN_STANDALONE_WORDS:
+        return False
+
+    # The last exchange is what a short follow-up leans on.
+    recent = {
+        _stem(word)
+        for _, content in history[-2:]
+        for word in _WORD.findall(content.lower())
+    }
+    return any(_stem(word) in recent for word in named)
