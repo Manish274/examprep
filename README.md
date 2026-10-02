@@ -9,8 +9,6 @@ Grounded accuracy is the design priority. When the uploaded material cannot
 support an answer, the app says so rather than filling the gap from the model's
 own knowledge.
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for the decision record.
-
 ---
 
 ## How it works
@@ -405,9 +403,16 @@ re-analysed against a different baseline for free:
 cd services/rag && .venv/Scripts/python.exe scripts/evaluate.py --analyse reports/m6-nlp-lecture.json --baseline hybrid_rerank
 ```
 
-Results so far are in [docs/evaluation-baseline.md](docs/evaluation-baseline.md).
-They do **not** favour hybrid with reranking, which is why they are written
-down.
+Results so far do **not** favour hybrid with reranking, which is why they are
+worth stating. Across three runs — two small corpora of 20 to 40 chunks, 19
+hand-written questions mixing terminology and paraphrase — the order was the
+same every time: dense, then hybrid with reranking, then hybrid, then BM25. On
+the 40-chunk run dense reached MRR 0.912 against 0.756 for hybrid with
+reranking, and fusion never once ranked the right passage above dense. The
+`fuse` span shows why: at this size both retrievers return the same candidates,
+so fusion can only reorder the better list by the worse one's opinion. Nineteen
+questions is the binding constraint, and the comparison is worth repeating on a
+corpus large enough for the two retrievers to disagree.
 
 ---
 

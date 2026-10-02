@@ -43,3 +43,7 @@ coverage/
 .nyc_output/
 htmlcov/
 .coverage
+
+# Markdown stays local: the repository carries only the README.
+*.md
+!/README.md
