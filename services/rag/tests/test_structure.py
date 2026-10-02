@@ -3,6 +3,7 @@ from __future__ import annotations
 from app.parsing.structure import (
     HeadingStack,
     LineRecord,
+    body_ceiling,
     body_font_size,
     detect_heading_levels,
 )
@@ -39,6 +40,21 @@ class TestBodyFontSize:
 
     def test_empty_input_returns_zero(self) -> None:
         assert body_font_size([]) == 0.0
+
+
+class TestBodyCeiling:
+    def test_is_the_body_size_when_there_is_one(self) -> None:
+        lines = [_line("Title", 24.0, 0), _line("x" * 400, 11.0, 1)]
+        assert body_ceiling(lines) == 11.0
+
+    def test_takes_in_a_second_size_that_carries_real_text(self) -> None:
+        # A slide deck with bullets at 20pt and 22pt: both are body copy.
+        lines = [_line("x" * 700, 20.0, 0), _line("y" * 300, 22.0, 1)]
+        assert body_ceiling(lines) == 22.0
+
+    def test_leaves_out_a_size_carrying_little(self) -> None:
+        lines = [_line("x" * 700, 20.0, 0), _line("Slide title", 26.0, 1)]
+        assert body_ceiling(lines) == 20.0
 
 
 class TestDetectHeadingLevels:
@@ -85,6 +101,26 @@ class TestDetectHeadingLevels:
                 1,
                 bold=True,
             ),
+        ]
+        assert 1 not in detect_heading_levels(lines)
+
+    def test_body_copy_at_a_second_size_is_not_read_as_headings(self) -> None:
+        # The Water Pollution deck: a fifth of its text set at 22pt beside
+        # 20pt. Read as headings, those slides vanished from the index.
+        body = "Point sources discharge pollutants at specific locations " * 3
+        lines = [
+            _line("Water pollution sources", 26.0, 0),
+            *[_line(body, 22.0, i) for i in range(1, 5)],
+            *[_line(body, 20.0, i) for i in range(5, 15)],
+        ]
+        levels = detect_heading_levels(lines)
+
+        assert levels == {0: 1}
+
+    def test_a_large_bullet_glyph_is_not_a_heading(self) -> None:
+        lines = [
+            _line("body text long enough to dominate the document", 11.0, 0),
+            _line("•", 16.0, 1),
         ]
         assert 1 not in detect_heading_levels(lines)
 

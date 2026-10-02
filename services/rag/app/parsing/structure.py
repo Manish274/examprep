@@ -28,6 +28,17 @@ _LEVEL_TOLERANCE = 0.03
 
 _MAX_LEVEL = 6
 
+# A second size carrying at least this much text, relative to the main body
+# size, is body text too. Slide decks set body copy at two sizes, and a
+# "heading level" holding a third as many words as the body is not one: read
+# as headings, its lines become section labels instead of searchable text,
+# and whole slides drop out of the index.
+_SECOND_BODY_SHARE = 0.3
+
+# ...given enough text to tell. In a document of a few lines, two short
+# headings can weigh as much as the body itself.
+_SECOND_BODY_MIN_CHARS = 200
+
 
 @dataclass
 class LineRecord:
@@ -60,9 +71,33 @@ def body_font_size(lines: list[LineRecord]) -> float:
     return weights.most_common(1)[0][0]
 
 
+def body_ceiling(lines: list[LineRecord]) -> float:
+    """The largest size that is still body text.
+
+    Usually the body size itself. Larger when a second size carries a real
+    share of the text -- 22pt bullets beside 20pt ones -- which is body copy,
+    not a heading level.
+    """
+    weights: Counter[float] = Counter()
+    for line in lines:
+        weights[round(line.font_size, 1)] += max(len(line.text.strip()), 1)
+    if not weights:
+        return 0.0
+
+    body, body_weight = weights.most_common(1)[0]
+    floor = max(body_weight * _SECOND_BODY_SHARE, _SECOND_BODY_MIN_CHARS)
+    return max(
+        size for size, weight in weights.items() if size == body or weight >= floor
+    )
+
+
 def _is_heading(line: LineRecord, body_size: float) -> bool:
     text = line.text.strip()
     if not text or len(text) > 200:
+        return False
+    # A bullet glyph or a rule set large is not a heading: it names nothing,
+    # and would only put a stray "•" in every citation under it.
+    if not any(ch.isalnum() for ch in text):
         return False
 
     if body_size > 0 and line.font_size >= body_size * _SIZE_RATIO:
@@ -83,7 +118,7 @@ def detect_heading_levels(lines: list[LineRecord]) -> dict[int, int]:
     if not lines:
         return {}
 
-    body_size = body_font_size(lines)
+    body_size = body_ceiling(lines)
     candidates = [line for line in lines if _is_heading(line, body_size)]
     if not candidates:
         return {}
